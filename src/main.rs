@@ -5,6 +5,7 @@ use config::Config;
 use monday::{MondayClient, MondayUser};
 use anyhow::{Result, anyhow};
 use std::process;
+use chrono::prelude::*;
 
 #[tokio::main]
 async fn main() {
@@ -17,7 +18,6 @@ async fn main() {
     }
 }
 
-// Update the error handling in src/main.rs
 async fn run() -> Result<()> {
     // Try to load existing config
     let config = match Config::load() {
@@ -58,6 +58,14 @@ async fn run() -> Result<()> {
     match client.get_current_user().await {
         Ok(user) => {
             display_user_info(&user);
+            
+            // Get current year
+            let current_year = get_current_year();
+            
+            // Print the required message
+            println!("\nRunning for user id {}, user name {}, email {} for year {}",
+                user.id, user.name, user.email, current_year);
+            
             println!("Connection successful! Ready to process claims.");
         }
         Err(e) => {
@@ -75,6 +83,11 @@ fn display_user_info(user: &MondayUser) {
     println!("Name: {}", user.name);
     println!("Email: {}", user.email);
     println!("===================================");
+}
+
+fn get_current_year() -> i32 {
+    let now = Local::now();
+    now.year()
 }
 
 fn mask_api_key(api_key: &str) -> String {
