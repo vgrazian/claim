@@ -62,21 +62,57 @@ Claims processed successfully!
 # Configuration File Location
 The API key is stored in a JSON configuration file. The location varies by operating system:
 
-Linux
-```
+## Linux
+```Linux
 ~/.config/claim/config.json
-Linux
 ```
-macOS
-Linux
-```
+## macOS
+``` Linux
 ~/Library/Application Support/com.yourname.claim/config.json
-Linux
 ```
 
-Windows
-Linux
-```
+## Windows
+``` Linux
 C:\Users\Username\AppData\Roaming\yourname\claim\config\config.json
 Linux
 ```
+
+# Security Notes
+The API key is stored in plain text (though in a protected system directory)
+When displayed, only the first 4 characters are shown, followed by asterisks
+The config file is created with standard file permissions for your user account
+
+
+# Development
+## Building
+```bash
+cargo build
+```
+## Running Tests
+```bash
+cargo test
+```
+## Running in Debug Mode
+```bash
+cargo run
+```
+## Building for Release
+```bash
+cargo build --release
+```
+
+# Project Structure
+```text
+claim/
+├── src/
+│   ├── main.rs      # Main application entry point
+│   └── config.rs    # Configuration management
+├── Cargo.toml       # Project dependencies and metadata
+└── README.md        # This file
+```
+
+# Dependencies
+serde - Serialization/deserialization framework
+serde_json - JSON support for Serde
+directories - Cross-platform directory location handling
+
