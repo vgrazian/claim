@@ -17,6 +17,7 @@ async fn main() {
     }
 }
 
+// Update the error handling in src/main.rs
 async fn run() -> Result<()> {
     // Try to load existing config
     let config = match Config::load() {
@@ -60,7 +61,8 @@ async fn run() -> Result<()> {
             println!("Connection successful! Ready to process claims.");
         }
         Err(e) => {
-            return Err(anyhow!("Failed to connect to Monday.com: {}", e));
+            eprintln!("Detailed error: {}", e);
+            return Err(anyhow!("Failed to connect to Monday.com. Please check:\n1. Your API key is correct\n2. You have internet connectivity\n3. Your Monday.com account has API access permissions"));
         }
     }
 
