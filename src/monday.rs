@@ -35,7 +35,6 @@ pub struct Board {
     pub id: String,
     pub name: String,
     pub groups: Option<Vec<Group>>,
-    pub items: Option<Vec<Item>>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -43,7 +42,12 @@ pub struct Group {
     #[serde(deserialize_with = "deserialize_string_id")]
     pub id: String,
     pub title: String,
-    pub items: Option<Vec<Item>>,
+    pub items_page: Option<ItemsPage>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct ItemsPage {
+    pub items: Vec<Item>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -58,10 +62,8 @@ pub struct Item {
 pub struct ColumnValue {
     #[serde(deserialize_with = "deserialize_string_id")]
     pub id: String,
-    #[serde(rename = "type")]
-    pub column_type: String,
-    pub text: String,
     pub value: Option<String>,
+    pub text: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -226,22 +228,20 @@ impl MondayClient {
         println!("Found group '{}' with ID: {}", group_name, group_id);
 
         // Now query items for this group with correct GraphQL syntax
+        // Based on the working example you provided
         let items_query = format!(
             r#"
         {{
             boards(ids: ["{}"]) {{
-                id
-                name
                 groups(ids: ["{}"]) {{
-                    id
-                    title
-                    items(limit: {}) {{
-                        id
-                        name
-                        column_values {{
+                    items_page(limit: {}) {{
+                        items {{
                             id
-                            type
-                            text
+                            name
+                            column_values {{
+                                id
+                                value
+                            }}
                         }}
                     }}
                 }}
@@ -275,17 +275,11 @@ impl MondayClient {
             return Err(anyhow!("Monday.com API errors: {}", error_messages.join(", ")));
         }
 
+        // Extract the board with items from the response
         let mut items_board = items_monday_response.data
             .and_then(|data| data.boards)
             .and_then(|mut boards| boards.pop())
             .ok_or_else(|| anyhow!("No board data found in items response"))?;
-
-        // Extract items from the group and put them in the board struct
-        if let Some(groups) = &items_board.groups {
-            if let Some(group) = groups.first() {
-                items_board.items = group.items.clone();
-            }
-        }
 
         // Combine the board info with groups from the first query
         items_board.groups = board.groups;
