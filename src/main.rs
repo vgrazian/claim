@@ -1,10 +1,14 @@
 mod config;
+mod monday;
 
 use config::Config;
+use monday::{MondayClient, MondayUser};
+use anyhow::{Result, anyhow};
 use std::process;
 
-fn main() {
-    match run() {
+#[tokio::main]
+async fn main() {
+    match run().await {
         Ok(_) => (),
         Err(e) => {
             eprintln!("Error: {}", e);
@@ -13,41 +17,62 @@ fn main() {
     }
 }
 
-fn run() -> Result<(), String> {
+async fn run() -> Result<()> {
     // Try to load existing config
-    match Config::load() {
+    let config = match Config::load() {
         Ok(config) => {
             println!("Loaded API key: {}", mask_api_key(&config.api_key));
-            println!("Using API key for claims processing...");
-            // Here you would use the API key for your actual functionality
-            process_claims(&config.api_key)?;
+            config
         }
         Err(_) => {
             println!("No API key found. Let's set one up!");
             let api_key = Config::prompt_for_api_key();
             
             if api_key.is_empty() {
-                return Err("API key cannot be empty".to_string());
+                return Err(anyhow!("API key cannot be empty"));
             }
 
-            let config = Config::new(api_key);
-            config.save()?;
+            let config = Config::new(api_key.clone());
             
-            println!("API key saved successfully!");
-            println!("Using API key for claims processing...");
-            process_claims(&config.api_key)?;
+            // Test the API key before saving
+            println!("Testing connection to Monday.com...");
+            let client = MondayClient::new(api_key);
+            match client.test_connection().await {
+                Ok(_) => {
+                    config.save()?;
+                    println!("API key validated and saved successfully!");
+                    config
+                }
+                Err(e) => {
+                    return Err(anyhow!("Failed to validate API key: {}. Please check your API key and try again.", e));
+                }
+            }
+        }
+    };
+
+    // Connect to Monday.com and get user info
+    println!("Connecting to Monday.com...");
+    let client = MondayClient::new(config.api_key.clone());
+    
+    match client.get_current_user().await {
+        Ok(user) => {
+            display_user_info(&user);
+            println!("Connection successful! Ready to process claims.");
+        }
+        Err(e) => {
+            return Err(anyhow!("Failed to connect to Monday.com: {}", e));
         }
     }
 
     Ok(())
 }
 
-fn process_claims(api_key: &str) -> Result<(), String> {
-    // Your actual claim processing logic would go here
-    println!("Processing claims with API key: {}", mask_api_key(api_key));
-    // Simulate some work
-    println!("Claims processed successfully!");
-    Ok(())
+fn display_user_info(user: &MondayUser) {
+    println!("\n=== Monday.com User Information ===");
+    println!("User ID: {}", user.id);
+    println!("Name: {}", user.name);
+    println!("Email: {}", user.email);
+    println!("===================================");
 }
 
 fn mask_api_key(api_key: &str) -> String {

@@ -9,6 +9,38 @@ A command-line application for processing claims with API key authentication.
 - Automatic API key loading for subsequent uses
 - Masked API key display for security
 
+# Monday.com Integration
+
+This application connects to Monday.com using your API key to retrieve user information and verify authentication.
+
+## Getting Your Monday.com API Key
+
+1. Log in to your Monday.com account
+2. Go to https://your-account.monday.com/admin/integrations/api
+3. Generate a new API key or use an existing one
+4. Copy the API key when prompted by the application
+
+## API Key Validation
+
+The application validates your API key by:
+1. Testing the connection to Monday.com's API
+2. Retrieving your user information (ID, name, email)
+3. Only saving the API key if validation succeeds
+
+## API Permissions
+
+Your Monday.com API key needs the following permissions:
+- Read access to user information
+- Access to the GraphQL API
+
+## Error Handling
+
+If you encounter connection errors:
+1. Verify your API key is correct
+2. Check your internet connection
+3. Ensure your Monday.com account is active
+4. Verify API key permissions
+
 ## Installation
 
 ### Prerequisites
@@ -45,13 +77,12 @@ Claims processed successfully!
 ```
 
 ## Subsequent Runs
-After the initial setup, the application will automatically use the stored API key:
+After the initial setup, the application will automatically use the stored API key. If the API key needs to be changed you will need to manually delete the config file.
 
 ```bash
 cargo run
 ```
 ## Output:
-
 ```text
 Loaded API key: your******
 Using API key for claims processing...
@@ -60,12 +91,13 @@ Claims processed successfully!
 ```
 
 # Configuration File Location
-The API key is stored in a JSON configuration file. The location varies by operating system:
+The API key is stored in a JSON configuration file. The location varies by operating system.
 
 ## Linux
 ```Linux
 ~/.config/claim/config.json
 ```
+
 ## macOS
 ``` Linux
 ~/Library/Application Support/com.yourname.claim/config.json
