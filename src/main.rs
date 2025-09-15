@@ -2,7 +2,7 @@ mod config;
 mod monday;
 
 use config::Config;
-use monday::{MondayClient, MondayUser, Item, Group};
+use monday::{MondayClient, MondayUser, Item};
 use anyhow::{Result, anyhow};
 use std::process;
 use chrono::prelude::*;
@@ -116,7 +116,7 @@ async fn query_board(client: &MondayClient, user: &MondayUser, year: &str, limit
     
     println!("\n=== Board: {} ===", board.name);
     
-    // Display groups - now handling Option<Vec<Group>>
+    // Display groups
     println!("\nAvailable groups:");
     if let Some(groups) = &board.groups {
         for group in groups {
@@ -126,99 +126,47 @@ async fn query_board(client: &MondayClient, user: &MondayUser, year: &str, limit
         println!("  - No groups found in board");
     }
     
-    // Display items if available - now using groups[].items_page instead of board.items_page
+    // Display filtered items - look for any group that has items
+    let mut found_items = false;
     if let Some(groups) = &board.groups {
-        if let Some(group) = groups.iter().find(|g| g.title == year) {
+        for group in groups {
             if let Some(ref items_page) = group.items_page {
-                println!("\n=== Items in Group '{}' (Limit: {}) ===", year, limit);
-                
-                if items_page.items.is_empty() {
-                    println!("No items found in this group.");
-                } else {
-                    let user_items: Vec<&Item> = items_page.items.iter()
-                        .filter(|item| is_user_item(item, user))
-                        .take(limit)
-                        .collect();
+                if !items_page.items.is_empty() {
+                    found_items = true;
+                    println!("\n=== FILTERED ITEMS for User {} ===", user.name);
+                    println!("Found {} items for user {} in group '{}':", 
+                            items_page.items.len(), user.name, group.title);
                     
-                    if user_items.is_empty() {
-                        println!("No items found for user {} in this group.", user.name);
-                    } else {
-                        println!("Found {} items for user {}:", user_items.len(), user.name);
-                        for (index, item) in user_items.iter().enumerate() {
-                            println!("\n{}. {} (ID: {})", index + 1, item.name, item.id);
-                            println!("   Columns:");
-                            
-                            for col in &item.column_values {
-                                if let Some(value) = &col.value {
-                                    if value != "null" && !value.is_empty() {
-                                        println!("     - {}: {}", col.id, value);
-                                    }
+                    for (index, item) in items_page.items.iter().enumerate() {
+                        let item_name = item.name.as_deref().unwrap_or("Unnamed");
+                        let item_id = item.id.as_deref().unwrap_or("Unknown");
+                        println!("\n{}. {} (ID: {})", index + 1, item_name, item_id);
+                        println!("   Columns:");
+                        
+                        for col in &item.column_values {
+                            if let Some(value) = &col.value {
+                                if value != "null" && !value.is_empty() {
+                                    let col_id = col.id.as_deref().unwrap_or("Unknown");
+                                    println!("     - {}: {}", col_id, value);
                                 }
                             }
                         }
                     }
+                    break; // Only show the first group with items
                 }
-            } else {
-                println!("\nNo items found in group '{}'.", year);
             }
-        } else {
-            println!("\nGroup '{}' not found in the board.", year);
         }
-    } else {
-        println!("\nNo groups found in the board.");
     }
     
-    // Display available columns from first item (if any)
-    if let Some(groups) = &board.groups {
-        if let Some(group) = groups.iter().find(|g| g.title == year) {
-            if let Some(ref items_page) = group.items_page {
-                if let Some(first_item) = items_page.items.first() {
-                    println!("\n=== Available Columns ===");
-                    for col in &first_item.column_values {
-                        if let Some(value) = &col.value {
-                            println!("  - {}: {}", col.id, value);
-                        } else {
-                            println!("  - {}: null", col.id);
-                        }
-                    }
-                }
-            }
-        }
+    if !found_items {
+        println!("\nNo items found for user {} in any group.", user.name);
+        println!("This means either:");
+        println!("1. No items exist in any group");
+        println!("2. Items exist but none are assigned to user ID {}", user.id);
+        println!("3. The person column uses a different format than expected");
     }
     
     Ok(())
-}
-
-// Helper function to filter items by user
-fn is_user_item(item: &Item, user: &MondayUser) -> bool {
-    // Look for user information in column values
-    for col in &item.column_values {
-        // Check if this column might contain user information
-        if let Some(value) = &col.value {
-            // Check for user ID in the value
-            if value.contains(&user.id.to_string()) {
-                return true;
-            }
-            
-            // Check for user name or email in person-related columns
-            if col.id == "person" || col.id.contains("user") || col.id.contains("people") {
-                let value_lower = value.to_lowercase();
-                let name_lower = user.name.to_lowercase();
-                let email_lower = user.email.to_lowercase();
-                
-                if value_lower.contains(&name_lower) 
-                    || value_lower.contains(&email_lower) 
-                    || value_lower.contains(&user.name.split_whitespace().next().unwrap_or("").to_lowercase()) 
-                    || value_lower.contains(&user.name.split_whitespace().last().unwrap_or("").to_lowercase()) {
-                    return true;
-                }
-            }
-        }
-    }
-    
-    // If we can't determine ownership, show all items for debugging
-    // In production, you might want to return false here
-    true
 }
 
 fn get_current_year() -> i32 {

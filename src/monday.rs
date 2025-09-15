@@ -47,22 +47,27 @@ pub struct Group {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct ItemsPage {
+    #[serde(default)]
     pub items: Vec<Item>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Default)]
 pub struct Item {
-    #[serde(deserialize_with = "deserialize_string_id")]
-    pub id: String,
-    pub name: String,
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
     pub column_values: Vec<ColumnValue>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Default)]
 pub struct ColumnValue {
-    #[serde(deserialize_with = "deserialize_string_id")]
-    pub id: String,
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
     pub value: Option<String>,
+    #[serde(default)]
     pub text: Option<String>,
 }
 
@@ -106,6 +111,7 @@ where
     match value {
         Value::Number(num) => Ok(num.to_string()),
         Value::String(s) => Ok(s),
+        Value::Null => Ok("null".to_string()),
         _ => Err(serde::de::Error::custom("ID must be a string or number")),
     }
 }
@@ -129,20 +135,16 @@ impl MondayClient {
         }
         "#;
 
+        println!("Sending user query:\n{}", query);
+
         let request_body = MondayRequest {
             query: query.to_string(),
         };
 
         let response = self.send_request(request_body).await?;
         
-        // Debug: print raw response
-        let preview = if response.len() > 200 {
-            format!("{}...", &response[..200])
-        } else {
-            response.clone()
-        };
-        println!("User API response: {}", preview);
-        
+        println!("User API response: {}", &response[..200.min(response.len())]);
+
         let monday_response: MondayResponse = serde_json::from_str(&response)
             .map_err(|e| anyhow!("Failed to parse Monday.com user response: {}", e))?;
 
@@ -186,18 +188,12 @@ impl MondayClient {
             board_id
         );
 
-        println!("Sending board query: {}", query);
+        println!("Sending board query:\n{}", query);
 
         let request_body = MondayRequest { query };
         let response = self.send_request(request_body).await?;
-        
-        // Print the response for debugging
-        let preview = if response.len() > 500 {
-            format!("{}...", &response[..500])
-        } else {
-            response.clone()
-        };
-        println!("Board response: {}", preview);
+
+        println!("Board response: {}", &response[..500.min(response.len())]);
 
         let monday_response: MondayResponse = serde_json::from_str(&response)
             .map_err(|e| anyhow!("Failed to parse board response: {}", e))?;
@@ -227,18 +223,20 @@ impl MondayClient {
 
         println!("Found group '{}' with ID: {}", group_name, group_id);
 
-        // Now query items for this group with correct GraphQL syntax
-        // Based on the working example you provided
+        // Now get items with a simplified query that includes group info
+        println!("\nGetting items with simplified query...");
         let items_query = format!(
             r#"
         {{
             boards(ids: ["{}"]) {{
                 groups(ids: ["{}"]) {{
+                    id
+                    title
                     items_page(limit: {}) {{
                         items {{
                             id
                             name
-                            column_values {{
+                            column_values(ids: ["person"]) {{
                                 id
                                 value
                             }}
@@ -248,23 +246,34 @@ impl MondayClient {
             }}
         }}
         "#,
-            board_id, group_id, limit
+            board_id, group_id, 50
         );
 
-        println!("Sending items query: {}", items_query);
+        println!("Sending items query:\n{}", items_query);
 
         let items_request_body = MondayRequest { query: items_query };
         let items_response = self.send_request(items_request_body).await?;
-        
-        let items_preview = if items_response.len() > 500 {
-            format!("{}...", &items_response[..500])
-        } else {
-            items_response.clone()
-        };
-        println!("Items response: {}", items_preview);
 
-        let items_monday_response: MondayResponse = serde_json::from_str(&items_response)
-            .map_err(|e| anyhow!("Failed to parse items response: {}", e))?;
+        println!("Items response: {}", &items_response[..500.min(items_response.len())]);
+
+        // Parse the response with better error handling
+        let items_monday_response: Result<MondayResponse, _> = serde_json::from_str(&items_response);
+        
+        let items_monday_response = match items_monday_response {
+            Ok(response) => response,
+            Err(e) => {
+                println!("Standard parsing failed: {}, trying manual extraction...", e);
+                manually_parse_response(&items_response).unwrap_or_else(|_| {
+                    MondayResponse {
+                        data: None,
+                        errors: vec![MondayError {
+                            message: format!("Failed to parse response: {}", e),
+                            error_code: "PARSE_ERROR".to_string(),
+                        }],
+                    }
+                })
+            }
+        };
 
         // Check for API errors
         if !items_monday_response.errors.is_empty() {
@@ -281,10 +290,98 @@ impl MondayClient {
             .and_then(|mut boards| boards.pop())
             .ok_or_else(|| anyhow!("No board data found in items response"))?;
 
-        // Combine the board info with groups from the first query
-        items_board.groups = board.groups;
+        // Debug: show what we found before filtering
+        println!("\n=== ITEMS BEFORE FILTERING ===");
+        if let Some(groups) = &items_board.groups {
+            for group in groups {
+                if let Some(items_page) = &group.items_page {
+                    println!("Group '{}' (ID: {}) has {} items", group.title, group.id, items_page.items.len());
+                    for item in &items_page.items {
+                        let item_name = item.name.as_deref().unwrap_or("Unnamed");
+                        println!("- {} (ID: {})", item_name, item.id.as_deref().unwrap_or("Unknown"));
+                    }
+                }
+            }
+        }
 
-        Ok(items_board)
+        // Filter items locally by user
+        if let Some(groups) = &mut items_board.groups {
+            for group in groups {
+                if let Some(items_page) = &mut group.items_page {
+                    let original_count = items_page.items.len();
+                    items_page.items.retain(|item| is_user_item(item, user_id));
+                    println!("Filtered {} items down to {} items for user {}", 
+                            original_count, items_page.items.len(), user_id);
+                    
+                    // Debug: show filtered items
+                    if !items_page.items.is_empty() {
+                        println!("=== FILTERED ITEMS ===");
+                        for item in &items_page.items {
+                            let item_name = item.name.as_deref().unwrap_or("Unnamed");
+                            println!("- {} (ID: {})", item_name, item.id.as_deref().unwrap_or("Unknown"));
+                        }
+                    }
+                    
+                    // Limit to the requested number of items
+                    if items_page.items.len() > limit {
+                        items_page.items.truncate(limit);
+                    }
+                }
+            }
+        }
+
+        // Merge the filtered results back into the original board structure
+        let mut result_board = board.clone();
+        
+        println!("\n=== MERGING RESULTS ===");
+        println!("Original board: {}", result_board.name);
+        
+        // Replace just the items in the target group with the filtered items
+        if let Some(result_groups) = &mut result_board.groups {
+            if let Some(filtered_groups) = &items_board.groups {
+                for result_group in result_groups {
+                    println!("Checking group: {} ({})", result_group.title, result_group.id);
+                    
+                    if result_group.title == group_name {
+                        println!("Found target group: {}", group_name);
+                        
+                        if let Some(filtered_group) = filtered_groups.iter().find(|g| g.id == result_group.id) {
+                            println!("Found matching filtered group with {} items", 
+                                   filtered_group.items_page.as_ref().map_or(0, |ip| ip.items.len()));
+                            
+                            result_group.items_page = filtered_group.items_page.clone();
+                        } else {
+                            println!("No matching filtered group found for ID: {}", result_group.id);
+                        }
+                        break;
+                    }
+                }
+            } else {
+                println!("No filtered groups found");
+            }
+        } else {
+            println!("No result groups found");
+        }
+
+        // Debug: show final result
+        println!("\n=== FINAL RESULT ===");
+        println!("Board: {}", result_board.name);
+        if let Some(groups) = &result_board.groups {
+            for group in groups {
+                let item_count = group.items_page.as_ref().map_or(0, |ip| ip.items.len());
+                println!("Group '{}': {} items", group.title, item_count);
+                if item_count > 0 {
+                    if let Some(items_page) = &group.items_page {
+                        for item in &items_page.items {
+                            let item_name = item.name.as_deref().unwrap_or("Unnamed");
+                            println!("  - {} (ID: {})", item_name, item.id.as_deref().unwrap_or("Unknown"));
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(result_board)
     }
 
     async fn send_request(&self, request_body: MondayRequest) -> Result<String> {
@@ -313,4 +410,116 @@ impl MondayClient {
         self.get_current_user().await?;
         Ok(())
     }
+}
+
+// Helper function to manually parse response if standard parsing fails
+fn manually_parse_response(response: &str) -> Result<MondayResponse, anyhow::Error> {
+    let value: Value = serde_json::from_str(response)?;
+    
+    let mut boards = Vec::new();
+    if let Some(data) = value.get("data") {
+        if let Some(boards_array) = data.get("boards").and_then(|b| b.as_array()) {
+            for board_val in boards_array {
+                let board_id = board_val.get("id").and_then(|id| id.as_str()).unwrap_or("unknown").to_string();
+                let board_name = board_val.get("name").and_then(|name| name.as_str()).unwrap_or("unknown").to_string();
+                
+                let mut board = Board {
+                    id: board_id,
+                    name: board_name,
+                    groups: None,
+                };
+                
+                if let Some(groups_array) = board_val.get("groups").and_then(|g| g.as_array()) {
+                    let mut groups = Vec::new();
+                    for group_val in groups_array {
+                        let group_id = group_val.get("id").and_then(|id| id.as_str()).unwrap_or("unknown").to_string();
+                        let group_title = group_val.get("title").and_then(|title| title.as_str()).unwrap_or("unknown").to_string();
+                        
+                        let mut group = Group {
+                            id: group_id,
+                            title: group_title,
+                            items_page: None,
+                        };
+                        
+                        if let Some(items_page_val) = group_val.get("items_page") {
+                            let mut items_page = ItemsPage { items: Vec::new() };
+                            
+                            if let Some(items_array) = items_page_val.get("items").and_then(|i| i.as_array()) {
+                                for item_val in items_array {
+                                    let item_id = item_val.get("id").and_then(|id| id.as_str()).map(|s| s.to_string());
+                                    let item_name = item_val.get("name").and_then(|name| name.as_str()).map(|s| s.to_string());
+                                    
+                                    let mut item = Item {
+                                        id: item_id,
+                                        name: item_name,
+                                        column_values: Vec::new(),
+                                    };
+                                    
+                                    if let Some(columns_array) = item_val.get("column_values").and_then(|c| c.as_array()) {
+                                        for col_val in columns_array {
+                                            let col_id = col_val.get("id").and_then(|id| id.as_str()).map(|s| s.to_string());
+                                            let col_value = col_val.get("value").and_then(|v| v.as_str()).map(|s| s.to_string());
+                                            let col_text = col_val.get("text").and_then(|t| t.as_str()).map(|s| s.to_string());
+                                            
+                                            let column = ColumnValue {
+                                                id: col_id,
+                                                value: col_value,
+                                                text: col_text,
+                                            };
+                                            item.column_values.push(column);
+                                        }
+                                    }
+                                    
+                                    items_page.items.push(item);
+                                }
+                            }
+                            
+                            group.items_page = Some(items_page);
+                        }
+                        
+                        groups.push(group);
+                    }
+                    
+                    board.groups = Some(groups);
+                }
+                
+                boards.push(board);
+            }
+        }
+    }
+    
+    Ok(MondayResponse {
+        data: Some(MondayData {
+            me: None,
+            boards: Some(boards),
+        }),
+        errors: Vec::new(),
+    })
+}
+
+// Helper function to filter items by user
+fn is_user_item(item: &Item, user_id: i64) -> bool {
+    for col in &item.column_values {
+        if let Some(value) = &col.value {
+            if let Some(col_id) = &col.id {
+                if col_id == "person" {
+                    // Parse the JSON value to extract user IDs
+                    if let Ok(parsed_value) = serde_json::from_str::<serde_json::Value>(value) {
+                        if let Some(persons) = parsed_value.get("personsAndTeams") {
+                            if let Some(persons_array) = persons.as_array() {
+                                for person in persons_array {
+                                    if let Some(person_id) = person.get("id").and_then(|id| id.as_i64()) {
+                                        if person_id == user_id {
+                                            return true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
 }
