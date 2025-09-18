@@ -135,18 +135,19 @@ async fn handle_add_command(
     hours: Option<f64>,
     days: Option<f64>,
 ) -> Result<()> {
-    let (final_date, final_activity_type, final_customer, final_work_item, final_hours, final_days) = 
+    let (final_date, final_activity_type, final_customer, final_work_item, final_hours, final_days, is_interactive) = 
         if date.is_none() && activity_type.is_none() && customer.is_none() && 
            work_item.is_none() && hours.is_none() && days.is_none() {
         // Interactive mode - no parameters provided
-        prompt_for_claim_details()?
+        let (d, at, c, wi, h, d_val) = prompt_for_claim_details()?;
+        (d, at, c, wi, h, d_val, true)
     } else {
         // Command line mode - use provided parameters
         // Validate date if provided
         if let Some(ref d) = date {
             validate_date(d)?;
         }
-        (date.unwrap_or_default(), activity_type, customer, work_item, hours, days)
+        (date.unwrap_or_default(), activity_type, customer, work_item, hours, days, false)
     };
     
     // Validate that we have at least the date
@@ -173,12 +174,52 @@ async fn handle_add_command(
     println!("Hours: {}", final_hours.map(|h| h.to_string()).unwrap_or_else(|| "Not specified".to_string()));
     println!("Days: {}", days_value);
     
+    // If this was interactive mode, show the equivalent command line
+    if is_interactive {
+        show_equivalent_command(&final_date, &activity_type_str, &final_customer, &final_work_item, final_hours, days_value);
+    }
+    
     // Here you would typically call a function to actually add the item to Monday.com
     // For now, we'll just display the confirmation
     println!("\n✅ Claim would be added to Monday.com board");
     println!("Note: Actual Monday.com integration is not yet implemented");
     
     Ok(())
+}
+
+fn show_equivalent_command(date: &str, activity_type: &str, customer: &Option<String>, work_item: &Option<String>, hours: Option<f64>, days: f64) {
+    println!("\n💡 Equivalent command line:");
+    
+    let mut command_parts = Vec::new();
+    command_parts.push(format!("claim add -D {}", date));
+    
+    // Only include activity type if it's not the default "billable"
+    if activity_type != "billable" {
+        command_parts.push(format!("-t {}", activity_type));
+    }
+    
+    if let Some(c) = customer {
+        if !c.is_empty() {
+            command_parts.push(format!("-c \"{}\"", c));
+        }
+    }
+    
+    if let Some(wi) = work_item {
+        if !wi.is_empty() {
+            command_parts.push(format!("-w \"{}\"", wi));
+        }
+    }
+    
+    if let Some(h) = hours {
+        command_parts.push(format!("-H {}", h));
+    }
+    
+    // Only include days if it's not the default 1.0
+    if (days - 1.0).abs() > f64::EPSILON {
+        command_parts.push(format!("-d {}", days));
+    }
+    
+    println!("   {}", command_parts.join(" "));
 }
 
 fn prompt_for_claim_details() -> Result<(String, Option<String>, Option<String>, Option<String>, Option<f64>, Option<f64>)> {
