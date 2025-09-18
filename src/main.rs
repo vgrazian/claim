@@ -46,7 +46,7 @@ enum Commands {
         #[arg(short = 'H', long)]
         hours: Option<f64>,
         
-        /// Number of working days (default: 1)
+        /// Number of working days (default: 1, skips weekends)
         #[arg(short = 'd', long)]
         days: Option<f64>,
     },
@@ -125,7 +125,7 @@ async fn run(cli: Cli) -> Result<()> {
 }
 
 async fn handle_add_command(
-    client: &MondayClient,
+    _client: &MondayClient,  // Added underscore to suppress unused warning
     user: &MondayUser,
     current_year: &str,
     date: Option<String>,
@@ -162,6 +162,11 @@ async fn handle_add_command(
     // Process days - default to 1.0 if not provided
     let days_value = final_days.unwrap_or(1.0);
     
+    // Calculate the actual dates (skipping weekends)
+    let start_date = chrono::NaiveDate::parse_from_str(&final_date, "%Y-%m-%d")?;
+    let target_days = days_value as i64;
+    let actual_dates = calculate_working_dates(start_date, target_days);
+    
     // Display the user info and the claim that would be added
     println!("\n=== Adding Claim for User ===");
     println!("User ID: {}, Name: {}, Email: {}", user.id, user.name, user.email);
@@ -172,7 +177,15 @@ async fn handle_add_command(
     println!("Customer: {}", final_customer.as_deref().unwrap_or("Not specified"));
     println!("Work Item: {}", final_work_item.as_deref().unwrap_or("Not specified"));
     println!("Hours: {}", final_hours.map(|h| h.to_string()).unwrap_or_else(|| "Not specified".to_string()));
-    println!("Days: {}", days_value);
+    println!("Days requested: {}", days_value);
+    println!("Actual working days: {}", actual_dates.len());
+    
+    // Show which dates will be used
+    println!("\n📅 Dates that will be created (weekends skipped):");
+    for (i, date) in actual_dates.iter().enumerate() {
+        let weekday = date.format("%A");
+        println!("  {}. {} ({})", i + 1, date.format("%Y-%m-%d"), weekday);
+    }
     
     // If this was interactive mode, show the equivalent command line
     if is_interactive {
@@ -181,10 +194,30 @@ async fn handle_add_command(
     
     // Here you would typically call a function to actually add the item to Monday.com
     // For now, we'll just display the confirmation
-    println!("\n✅ Claim would be added to Monday.com board");
+    println!("\n✅ {} claim(s) would be added to Monday.com board", actual_dates.len());
     println!("Note: Actual Monday.com integration is not yet implemented");
     
     Ok(())
+}
+
+fn calculate_working_dates(start_date: NaiveDate, target_days: i64) -> Vec<NaiveDate> {
+    let mut dates = Vec::new();
+    let mut current_date = start_date;
+    let mut days_added = 0;
+    
+    while days_added < target_days {
+        // Check if it's a weekday (Monday = 1, Friday = 5)
+        let weekday = current_date.weekday().number_from_monday();
+        if weekday <= 5 {
+            dates.push(current_date);
+            days_added += 1;
+        }
+        
+        // Move to next day
+        current_date = current_date + chrono::Duration::days(1);
+    }
+    
+    dates
 }
 
 fn show_equivalent_command(date: &str, activity_type: &str, customer: &Option<String>, work_item: &Option<String>, hours: Option<f64>, days: f64) {
@@ -295,7 +328,7 @@ fn prompt_for_claim_details() -> Result<(String, Option<String>, Option<String>,
     };
     
     // Days (optional, defaults to 1)
-    print!("Number of working days (optional, default: 1): ");
+    print!("Number of working days (optional, default: 1, skips weekends): ");
     io::stdout().flush()?;
     let mut days = String::new();
     io::stdin().read_line(&mut days)?;
@@ -384,7 +417,7 @@ async fn query_board(client: &MondayClient, user: &MondayUser, year: &str, limit
     }
     
     // Display filtered items - look for any group that has items
-    let mut found_items = false;
+    let mut found_items = false;  // Fixed: initialize as false
     if let Some(groups) = &board.groups {
         for group in groups {
             if let Some(ref items_page) = group.items_page {
