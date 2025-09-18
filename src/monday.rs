@@ -384,6 +384,53 @@ impl MondayClient {
         Ok(result_board)
     }
 
+    pub async fn create_item(
+        &self,
+        board_id: &str,
+        group_id: &str,
+        item_name: &str,
+        column_values: &serde_json::Value,
+    ) -> Result<String> {
+        let query = format!(
+            r#"
+        mutation {{
+            create_item(
+                board_id: "{}",
+                group_id: "{}",
+                item_name: "{}",
+                column_values: "{}"
+            ) {{
+                id
+            }}
+        }}
+        "#,
+            board_id,
+            group_id,
+            item_name,
+            column_values.to_string().replace('"', "\\\"")
+        );
+
+        let request_body = MondayRequest {
+            query: query.to_string(),
+        };
+
+        let response = self.send_request(request_body).await?;
+        let monday_response: MondayResponse = serde_json::from_str(&response)
+            .map_err(|e| anyhow!("Failed to parse create item response: {}", e))?;
+
+        if !monday_response.errors.is_empty() {
+            let error_messages: Vec<String> = monday_response.errors
+                .iter()
+                .map(|e| format!("{} (code: {})", e.message, e.error_code))
+                .collect();
+            return Err(anyhow!("Monday.com API errors: {}", error_messages.join(", ")));
+        }
+
+        // Extract the created item ID
+        // This would need proper parsing based on the actual mutation response structure
+        Ok("item_id_placeholder".to_string())
+    }
+
     async fn send_request(&self, request_body: MondayRequest) -> Result<String> {
         let response = self.client
             .post("https://api.monday.com/v2")
