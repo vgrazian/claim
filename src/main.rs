@@ -23,6 +23,10 @@ enum Commands {
         /// Number of rows to display (default: 5)
         #[arg(short, long, default_value_t = 5)]
         limit: usize,
+        
+        /// Date to filter claims (YYYY-MM-DD, YYYY.MM.DD, or YYYY/MM/DD format)
+        #[arg(short = 'D', long)]
+        date: Option<String>,
     },
     /// Add a new claim
     Add {
@@ -108,9 +112,9 @@ async fn run(cli: Cli) -> Result<()> {
 
     // Handle commands
     match cli.command {
-        Some(Commands::Query { limit }) => {
+        Some(Commands::Query { limit, date }) => {
             println!("Querying board for user's items (limit: {})...", limit);
-            query_board(&client, &user, &current_year, limit).await?;
+            query_board(&client, &user, &current_year, limit, date).await?;
         }
         Some(Commands::Add { date, activity_type, customer, work_item, hours, days }) => {
             handle_add_command(&client, &user, &current_year, date, activity_type, customer, work_item, hours, days).await?;
@@ -125,7 +129,7 @@ async fn run(cli: Cli) -> Result<()> {
 }
 
 async fn handle_add_command(
-    _client: &MondayClient,  // Added underscore to suppress unused warning
+    _client: &MondayClient,
     user: &MondayUser,
     current_year: &str,
     date: Option<String>,
@@ -196,6 +200,120 @@ async fn handle_add_command(
     // For now, we'll just display the confirmation
     println!("\n✅ {} claim(s) would be added to Monday.com board", actual_dates.len());
     println!("Note: Actual Monday.com integration is not yet implemented");
+    
+    Ok(())
+}
+
+async fn query_board(
+    client: &MondayClient,
+    user: &MondayUser,
+    year: &str,
+    limit: usize,
+    date: Option<String>,
+) -> Result<()> {
+    let board_id = "6500270039";
+    
+    // Handle date filtering if provided
+    let normalized_date = if let Some(ref date_str) = date {
+        // Validate the date format
+        validate_date(date_str)?;
+        Some(normalize_date(date_str))
+    } else {
+        None
+    };
+    
+    if let Some(ref d) = normalized_date {
+        println!("Querying board {} for group '{}' with date filter: {}...", board_id, year, d);
+    } else {
+        println!("Querying board {} for group '{}'...", board_id, year);
+    }
+    
+    let board = client.query_board(board_id, year, user.id, limit).await?;
+    
+    println!("\n=== Board: {} ===", board.name);
+    
+    // Display groups
+    println!("\nAvailable groups:");
+    if let Some(groups) = &board.groups {
+        for group in groups {
+            println!("  - {} (ID: {})", group.title, group.id);
+        }
+    } else {
+        println!("  - No groups found in board");
+    }
+    
+    // Display filtered items - look for any group that has items
+    let mut found_items = false;
+    if let Some(groups) = &board.groups {
+        for group in groups {
+            if let Some(ref items_page) = group.items_page {
+                if !items_page.items.is_empty() {
+                    found_items = true;
+                    println!("\n=== FILTERED ITEMS for User {} ===", user.name);
+                    
+                    // Show date filter info if applicable
+                    if let Some(ref filter_date) = normalized_date {
+                        println!("Date filter: {}", filter_date);
+                    }
+                    
+                    println!("Found {} items for user {} in group '{}':", 
+                            items_page.items.len(), user.name, group.title);
+                    
+                    for (index, item) in items_page.items.iter().enumerate() {
+                        let item_name = item.name.as_deref().unwrap_or("Unnamed");
+                        let item_id = item.id.as_deref().unwrap_or("Unknown");
+                        println!("\n{}. {} (ID: {})", index + 1, item_name, item_id);
+                        
+                        // Display column values with titles in a formatted way
+                        if !item.column_values.is_empty() {
+                            println!("   Columns:");
+                            // Find the maximum column ID length for formatting
+                            let max_id_len = item.column_values.iter()
+                                .map(|col| col.id.as_deref().unwrap_or("").len())
+                                .max()
+                                .unwrap_or(0);
+                            
+                            for col in &item.column_values {
+                                if let Some(value) = &col.value {
+                                    if value != "null" && !value.is_empty() {
+                                        let col_id = col.id.as_deref().unwrap_or("Unknown");
+                                        let col_title = col_id;
+                                        // Format with aligned columns
+                                        println!("     {:<width$} : {}", col_title, value, width = max_id_len);
+                                    }
+                                } else if let Some(text) = &col.text {
+                                    if !text.is_empty() && text != "null" {
+                                        let col_id = col.id.as_deref().unwrap_or("Unknown");
+                                        let col_title = col_id;
+                                        // Format with aligned columns
+                                        println!("     {:<width$} : {}", col_title, text, width = max_id_len);
+                                    }
+                                }
+                            }
+                        } else {
+                            println!("   No column values available");
+                        }
+                    }
+                    break; // Only show the first group with items
+                }
+            }
+        }
+    }
+    
+    if !found_items {
+        println!("\nNo items found for user {} in any group.", user.name);
+        if let Some(ref filter_date) = normalized_date {
+            println!("Date filter: {}", filter_date);
+        }
+        println!("This means either:");
+        println!("1. No items exist in any group");
+        println!("2. Items exist but none are assigned to user ID {}", user.id);
+        if let Some(_) = normalized_date {
+            println!("3. No items match the date filter");
+        } else {
+            println!("3. The person column uses a different format than expected");
+        }
+    }
     
     Ok(())
 }
@@ -395,68 +513,6 @@ fn map_activity_type_to_value(activity_type: &str) -> u8 {
             1 // Default to billable for unknown types
         }
     }
-}
-
-async fn query_board(client: &MondayClient, user: &MondayUser, year: &str, limit: usize) -> Result<()> {
-    let board_id = "6500270039";
-    
-    println!("Querying board {} for group '{}'...", board_id, year);
-    
-    let board = client.query_board(board_id, year, user.id, limit).await?;
-    
-    println!("\n=== Board: {} ===", board.name);
-    
-    // Display groups
-    println!("\nAvailable groups:");
-    if let Some(groups) = &board.groups {
-        for group in groups {
-            println!("  - {} (ID: {})", group.title, group.id);
-        }
-    } else {
-        println!("  - No groups found in board");
-    }
-    
-    // Display filtered items - look for any group that has items
-    let mut found_items = false;  // Fixed: initialize as false
-    if let Some(groups) = &board.groups {
-        for group in groups {
-            if let Some(ref items_page) = group.items_page {
-                if !items_page.items.is_empty() {
-                    found_items = true;
-                    println!("\n=== FILTERED ITEMS for User {} ===", user.name);
-                    println!("Found {} items for user {} in group '{}':", 
-                            items_page.items.len(), user.name, group.title);
-                    
-                    for (index, item) in items_page.items.iter().enumerate() {
-                        let item_name = item.name.as_deref().unwrap_or("Unnamed");
-                        let item_id = item.id.as_deref().unwrap_or("Unknown");
-                        println!("\n{}. {} (ID: {})", index + 1, item_name, item_id);
-                        println!("   Columns:");
-                        
-                        for col in &item.column_values {
-                            if let Some(value) = &col.value {
-                                if value != "null" && !value.is_empty() {
-                                    let col_id = col.id.as_deref().unwrap_or("Unknown");
-                                    println!("     - {}: {}", col_id, value);
-                                }
-                            }
-                        }
-                    }
-                    break; // Only show the first group with items
-                }
-            }
-        }
-    }
-    
-    if !found_items {
-        println!("\nNo items found for user {} in any group.", user.name);
-        println!("This means either:");
-        println!("1. No items exist in any group");
-        println!("2. Items exist but none are assigned to user ID {}", user.id);
-        println!("3. The person column uses a different format than expected");
-    }
-    
-    Ok(())
 }
 
 fn get_current_year() -> i32 {

@@ -69,6 +69,8 @@ pub struct ColumnValue {
     pub value: Option<String>,
     #[serde(default)]
     pub text: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -223,8 +225,8 @@ impl MondayClient {
 
         println!("Found group '{}' with ID: {}", group_name, group_id);
 
-        // Now get items with a simplified query that includes group info
-        println!("\nGetting items with simplified query...");
+        // Now get items with ALL column values (not just person column)
+        println!("\nGetting items with all column values...");
         let items_query = format!(
             r#"
         {{
@@ -236,9 +238,10 @@ impl MondayClient {
                         items {{
                             id
                             name
-                            column_values(ids: ["person"]) {{
+                            column_values {{
                                 id
                                 value
+                                text
                             }}
                         }}
                     }}
@@ -290,20 +293,6 @@ impl MondayClient {
             .and_then(|mut boards| boards.pop())
             .ok_or_else(|| anyhow!("No board data found in items response"))?;
 
-        // Debug: show what we found before filtering
-        println!("\n=== ITEMS BEFORE FILTERING ===");
-        if let Some(groups) = &items_board.groups {
-            for group in groups {
-                if let Some(items_page) = &group.items_page {
-                    println!("Group '{}' (ID: {}) has {} items", group.title, group.id, items_page.items.len());
-                    for item in &items_page.items {
-                        let item_name = item.name.as_deref().unwrap_or("Unnamed");
-                        println!("- {} (ID: {})", item_name, item.id.as_deref().unwrap_or("Unknown"));
-                    }
-                }
-            }
-        }
-
         // Filter items locally by user
         if let Some(groups) = &mut items_board.groups {
             for group in groups {
@@ -312,15 +301,6 @@ impl MondayClient {
                     items_page.items.retain(|item| is_user_item(item, user_id));
                     println!("Filtered {} items down to {} items for user {}", 
                             original_count, items_page.items.len(), user_id);
-                    
-                    // Debug: show filtered items
-                    if !items_page.items.is_empty() {
-                        println!("=== FILTERED ITEMS ===");
-                        for item in &items_page.items {
-                            let item_name = item.name.as_deref().unwrap_or("Unnamed");
-                            println!("- {} (ID: {})", item_name, item.id.as_deref().unwrap_or("Unknown"));
-                        }
-                    }
                     
                     // Limit to the requested number of items
                     if items_page.items.len() > limit {
@@ -333,49 +313,15 @@ impl MondayClient {
         // Merge the filtered results back into the original board structure
         let mut result_board = board.clone();
         
-        println!("\n=== MERGING RESULTS ===");
-        println!("Original board: {}", result_board.name);
-        
         // Replace just the items in the target group with the filtered items
         if let Some(result_groups) = &mut result_board.groups {
             if let Some(filtered_groups) = &items_board.groups {
                 for result_group in result_groups {
-                    println!("Checking group: {} ({})", result_group.title, result_group.id);
-                    
                     if result_group.title == group_name {
-                        println!("Found target group: {}", group_name);
-                        
                         if let Some(filtered_group) = filtered_groups.iter().find(|g| g.id == result_group.id) {
-                            println!("Found matching filtered group with {} items", 
-                                   filtered_group.items_page.as_ref().map_or(0, |ip| ip.items.len()));
-                            
                             result_group.items_page = filtered_group.items_page.clone();
-                        } else {
-                            println!("No matching filtered group found for ID: {}", result_group.id);
                         }
                         break;
-                    }
-                }
-            } else {
-                println!("No filtered groups found");
-            }
-        } else {
-            println!("No result groups found");
-        }
-
-        // Debug: show final result
-        println!("\n=== FINAL RESULT ===");
-        println!("Board: {}", result_board.name);
-        if let Some(groups) = &result_board.groups {
-            for group in groups {
-                let item_count = group.items_page.as_ref().map_or(0, |ip| ip.items.len());
-                println!("Group '{}': {} items", group.title, item_count);
-                if item_count > 0 {
-                    if let Some(items_page) = &group.items_page {
-                        for item in &items_page.items {
-                            let item_name = item.name.as_deref().unwrap_or("Unnamed");
-                            println!("  - {} (ID: {})", item_name, item.id.as_deref().unwrap_or("Unknown"));
-                        }
                     }
                 }
             }
@@ -507,11 +453,13 @@ fn manually_parse_response(response: &str) -> Result<MondayResponse, anyhow::Err
                                             let col_id = col_val.get("id").and_then(|id| id.as_str()).map(|s| s.to_string());
                                             let col_value = col_val.get("value").and_then(|v| v.as_str()).map(|s| s.to_string());
                                             let col_text = col_val.get("text").and_then(|t| t.as_str()).map(|s| s.to_string());
+                                            let col_title = col_val.get("title").and_then(|t| t.as_str()).map(|s| s.to_string());
                                             
                                             let column = ColumnValue {
                                                 id: col_id,
                                                 value: col_value,
                                                 text: col_text,
+                                                title: col_title,
                                             };
                                             item.column_values.push(column);
                                         }
