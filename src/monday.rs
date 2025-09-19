@@ -69,8 +69,6 @@ pub struct ColumnValue {
     pub value: Option<String>,
     #[serde(default)]
     pub text: Option<String>,
-    #[serde(default)]
-    pub title: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -453,13 +451,11 @@ fn manually_parse_response(response: &str) -> Result<MondayResponse, anyhow::Err
                                             let col_id = col_val.get("id").and_then(|id| id.as_str()).map(|s| s.to_string());
                                             let col_value = col_val.get("value").and_then(|v| v.as_str()).map(|s| s.to_string());
                                             let col_text = col_val.get("text").and_then(|t| t.as_str()).map(|s| s.to_string());
-                                            let col_title = col_val.get("title").and_then(|t| t.as_str()).map(|s| s.to_string());
                                             
                                             let column = ColumnValue {
                                                 id: col_id,
                                                 value: col_value,
                                                 text: col_text,
-                                                title: col_title,
                                             };
                                             item.column_values.push(column);
                                         }

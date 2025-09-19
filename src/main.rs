@@ -34,7 +34,7 @@ enum Commands {
         #[arg(short = 'D', long)]
         date: Option<String>,
         
-        /// Activity type (vacation, billable, holding, education, work_reduction, tbd, holiday, unknown, illness)
+        /// Activity type (vacation, billable, holding, education, work_reduction, tbd, holiday, presales, illness, boh1, boh2, boh3)
         #[arg(short = 't', long)]
         activity_type: Option<String>,
         
@@ -154,10 +154,12 @@ async fn handle_add_command(
         (date.unwrap_or_default(), activity_type, customer, work_item, hours, days, false)
     };
     
-    // Validate that we have at least the date
-    if final_date.is_empty() {
-        return Err(anyhow!("Date is required for adding a claim"));
-    }
+    // If date is not provided, default to today's date
+    let final_date = if final_date.is_empty() {
+        Local::now().format("%Y-%m-%d").to_string()
+    } else {
+        final_date
+    };
     
     // Process activity type - default to "billable" if not provided
     let activity_type_str = final_activity_type.unwrap_or_else(|| "billable".to_string());
@@ -267,26 +269,29 @@ async fn query_board(
                         // Display column values with titles in a formatted way
                         if !item.column_values.is_empty() {
                             println!("   Columns:");
-                            // Find the maximum column ID length for formatting
-                            let max_id_len = item.column_values.iter()
-                                .map(|col| col.id.as_deref().unwrap_or("").len())
+                            // Find the maximum column title length for formatting
+                            let max_title_len = item.column_values.iter()
+                                .map(|col| {
+                                    let col_id = col.id.as_deref().unwrap_or("");
+                                    map_column_title(col_id).len()
+                                })
                                 .max()
                                 .unwrap_or(0);
                             
                             for col in &item.column_values {
-                                if let Some(value) = &col.value {
-                                    if value != "null" && !value.is_empty() {
-                                        let col_id = col.id.as_deref().unwrap_or("Unknown");
-                                        let col_title = col_id;
-                                        // Format with aligned columns
-                                        println!("     {:<width$} : {}", col_title, value, width = max_id_len);
-                                    }
-                                } else if let Some(text) = &col.text {
-                                    if !text.is_empty() && text != "null" {
-                                        let col_id = col.id.as_deref().unwrap_or("Unknown");
-                                        let col_title = col_id;
-                                        // Format with aligned columns
-                                        println!("     {:<width$} : {}", col_title, text, width = max_id_len);
+                                if let Some(col_id) = &col.id {
+                                    let column_title = map_column_title(col_id);
+                                    
+                                    if let Some(value) = &col.value {
+                                        if value != "null" && !value.is_empty() {
+                                            // Format with aligned columns
+                                            println!("     {:<width$} : {}", column_title, value, width = max_title_len);
+                                        }
+                                    } else if let Some(text) = &col.text {
+                                        if !text.is_empty() && text != "null" {
+                                            // Format with aligned columns
+                                            println!("     {:<width$} : {}", column_title, text, width = max_title_len);
+                                        }
                                     }
                                 }
                             }
@@ -316,6 +321,45 @@ async fn query_board(
     }
     
     Ok(())
+}
+
+fn map_column_title(column_id: &str) -> &str {
+    match column_id {
+        "subitems__1" => "Subitems",
+        "person" => "Person",
+        "status" => "Status",
+        "date4" => "Date",
+        "text__1" => "Text",
+        "text8__1" => "Text 8", 
+        "numbers__1" => "Numbers",
+        "hours" => "Hours",
+        "days" => "Days",
+        "activity_type" => "Activity Type",
+        "customer" => "Customer",
+        "work_item" => "Work Item",
+        _ => column_id, // Fall back to the ID if no mapping found
+    }
+}
+
+fn map_activity_type_to_value(activity_type: &str) -> u8 {
+    match activity_type.to_lowercase().as_str() {
+        "vacation" => 0,
+        "billable" => 1,
+        "holding" => 2,
+        "education" => 3,
+        "work_reduction" => 4,
+        "tbd" => 5,
+        "holiday" => 6,
+        "presales" => 7,
+        "illness" => 8,
+        "boh1" => 9,
+        "boh2" => 10,
+        "boh3" => 11,
+        _ => {
+            println!("Warning: Unknown activity type '{}', defaulting to billable (1)", activity_type);
+            1 // Default to billable for unknown types
+        }
+    }
 }
 
 fn calculate_working_dates(start_date: NaiveDate, target_days: i64) -> Vec<NaiveDate> {
@@ -379,27 +423,22 @@ fn prompt_for_claim_details() -> Result<(String, Option<String>, Option<String>,
     println!("\n=== Add New Claim ===");
     println!("Enter claim details (press Enter to skip optional fields):");
     
-    // Date (mandatory)
+    // Date (optional, defaults to today)
     let mut date = String::new();
-    loop {
-        print!("Date (YYYY-MM-DD, YYYY.MM.DD, or YYYY/MM/DD, required): ");
-        io::stdout().flush()?;
-        date.clear();
-        io::stdin().read_line(&mut date)?;
-        date = date.trim().to_string();
-        
-        if date.is_empty() {
-            println!("Date is required!");
-            continue;
-        }
-        
+    print!("Date (YYYY-MM-DD, YYYY.MM.DD, or YYYY/MM/DD, optional - default: today): ");
+    io::stdout().flush()?;
+    io::stdin().read_line(&mut date)?;
+    date = date.trim().to_string();
+    
+    // If date is provided, validate it
+    if !date.is_empty() {
         // Basic date validation with flexible separators
         if validate_date_flexible(&date).is_ok() {
             // Normalize the date to YYYY-MM-DD format
             date = normalize_date(&date);
-            break;
         } else {
             println!("Invalid date format. Please use YYYY-MM-DD, YYYY.MM.DD, or YYYY/MM/DD format.");
+            return Err(anyhow!("Invalid date format"));
         }
     }
     
@@ -495,24 +534,6 @@ fn normalize_date(date_str: &str) -> String {
     
     // If we can't parse it, return the original (this shouldn't happen if validate_date was called first)
     date_str.to_string()
-}
-
-fn map_activity_type_to_value(activity_type: &str) -> u8 {
-    match activity_type.to_lowercase().as_str() {
-        "vacation" => 0,
-        "billable" => 1,
-        "holding" => 2,
-        "education" => 3,
-        "work_reduction" => 4,
-        "tbd" => 5,
-        "holiday" => 6,
-        "unknown" => 7,
-        "illness" => 8,
-        _ => {
-            println!("Warning: Unknown activity type '{}', defaulting to billable (1)", activity_type);
-            1 // Default to billable for unknown types
-        }
-    }
 }
 
 fn get_current_year() -> i32 {
