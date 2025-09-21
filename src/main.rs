@@ -198,8 +198,8 @@ async fn handle_add_command(
     let board = client.query_board("6500270039", current_year, user.id, 1).await?;
     let group_id = get_year_group_id(&board, current_year);
     
-    // Show the GraphQL mutation that would be executed
-    show_graphql_mutation(&final_date, &activity_type_value, &final_customer, &final_work_item, final_hours, user.id, &user.name, &group_id);
+    // Show the GraphQL mutations that would be executed for ALL dates
+    show_graphql_mutations(&actual_dates, &activity_type_value, &final_customer, &final_work_item, final_hours, user.id, &user.name, &group_id);
     
     // If this was interactive mode, show the equivalent command line
     if is_interactive {
@@ -226,55 +226,58 @@ fn get_year_group_id(board: &monday::Board, year: &str) -> String {
     "new_group_mkkbbd2q".to_string()
 }
 
-fn show_graphql_mutation(date: &str, activity_type_value: &u8, customer: &Option<String>, work_item: &Option<String>, hours: Option<f64>, user_id: i64, user_name: &str, group_id: &str) {
-    println!("\n📋 GraphQL Mutation that would be executed:");
-    
-    let mut column_values = json!({});
-    
-    // Set person column
-    column_values["person"] = json!({
-        "personsAndTeams": [
-            {
-                "id": user_id,
-                "kind": "person"
-            }
-        ]
-    });
-    
-    // Set date column
-    column_values["date4"] = json!({
-        "date": date
-    });
-    
-    // Set activity type column
-    column_values["status"] = json!({
-        "index": activity_type_value
-    });
-    
-    // Set customer name if provided
-    if let Some(c) = customer {
-        if !c.is_empty() {
-            column_values["text__1"] = json!(c);
-        }
-    }
-    
-    // Set work item if provided
-    if let Some(wi) = work_item {
-        if !wi.is_empty() {
-            column_values["text8__1"] = json!(wi);
-        }
-    }
-    
-    // Set hours if provided
-    if let Some(h) = hours {
-        column_values["numbers__1"] = json!(h.to_string());
-    }
+fn show_graphql_mutations(actual_dates: &[NaiveDate], activity_type_value: &u8, customer: &Option<String>, work_item: &Option<String>, hours: Option<f64>, user_id: i64, user_name: &str, group_id: &str) {
+    println!("\n📋 GraphQL Mutations that would be executed:");
     
     let board_id = "6500270039";
-    let item_name = user_name;
     
-    let mutation = format!(
-        r#"mutation {{
+    for (i, date) in actual_dates.iter().enumerate() {
+        let date_str = date.format("%Y-%m-%d").to_string();
+        
+        let mut column_values = json!({});
+        
+        // Set person column
+        column_values["person"] = json!({
+            "personsAndTeams": [
+                {
+                    "id": user_id,
+                    "kind": "person"
+                }
+            ]
+        });
+        
+        // Set date column
+        column_values["date4"] = json!({
+            "date": date_str
+        });
+        
+        // Set activity type column
+        column_values["status"] = json!({
+            "index": activity_type_value
+        });
+        
+        // Set customer name if provided
+        if let Some(c) = customer {
+            if !c.is_empty() {
+                column_values["text__1"] = json!(c);
+            }
+        }
+        
+        // Set work item if provided
+        if let Some(wi) = work_item {
+            if !wi.is_empty() {
+                column_values["text8__1"] = json!(wi);
+            }
+        }
+        
+        // Set hours if provided
+        if let Some(h) = hours {
+            column_values["numbers__1"] = json!(h.to_string());
+        }
+        
+        let mutation = format!(
+            r#"// Mutation for {} ({} of {})
+mutation {{
     create_item(
         board_id: "{}",
         group_id: "{}",
@@ -283,14 +286,19 @@ fn show_graphql_mutation(date: &str, activity_type_value: &u8, customer: &Option
     ) {{
         id
     }}
-}}"#,
-        board_id,
-        group_id,
-        item_name,
-        column_values.to_string().replace('"', "\\\"")
-    );
-    
-    println!("{}", mutation);
+}}
+"#,
+            date_str,
+            i + 1,
+            actual_dates.len(),
+            board_id,
+            group_id,
+            user_name,
+            column_values.to_string().replace('"', "\\\"")
+        );
+        
+        println!("{}", mutation);
+    }
 }
 
 async fn query_board(
@@ -535,6 +543,7 @@ fn prompt_for_claim_details() -> Result<(String, Option<String>, Option<String>,
     let mut activity_type = String::new();
     io::stdin().read_line(&mut activity_type)?;
     let activity_type = activity_type.trim().to_string();
+   
    
     let activity_type = if activity_type.is_empty() { None } else { Some(activity_type) };
     
