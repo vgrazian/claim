@@ -8,6 +8,7 @@ use std::process;
 use chrono::prelude::*;
 use clap::{Parser, Subcommand};
 use serde_json::json;
+use std::io;
 
 #[derive(Parser)]
 #[command(name = "claim")]
@@ -198,38 +199,54 @@ async fn handle_add_command(
     let board = client.query_board("6500270039", current_year, user.id, 1).await?;
     let group_id = get_year_group_id(&board, current_year);
     
-    // Show the GraphQL mutations that would be executed for ALL dates
-    show_graphql_mutations(&actual_dates, &activity_type_value, &final_customer, &final_work_item, final_hours, user.id, &user.name, &group_id);
+    // Ask for confirmation before proceeding
+    println!("\n🚀 Ready to create {} item(s) on Monday.com", actual_dates.len());
+    println!("Do you want to proceed? (y/N)");
+    
+    let mut confirmation = String::new();
+    io::stdin().read_line(&mut confirmation)?;
+    
+    if confirmation.trim().to_lowercase() != "y" {
+        println!("Operation cancelled.");
+        return Ok(());
+    }
+    
+    // Actually create the items on Monday.com
+    create_items_on_monday(
+        client,
+        &actual_dates,
+        activity_type_value,
+        &final_customer,
+        &final_work_item,
+        final_hours,
+        user.id,
+        &user.name,
+        &group_id
+    ).await?;
     
     // If this was interactive mode, show the equivalent command line
     if is_interactive {
         show_equivalent_command(&final_date, &activity_type_str, &final_customer, &final_work_item, final_hours, days_value);
     }
     
-    // Here you would typically call a function to actually add the item to Monday.com
-    // For now, we'll just display the confirmation
-    println!("\n✅ {} claim(s) would be added to Monday.com board", actual_dates.len());
-    println!("Note: Actual Monday.com integration is not yet implemented");
-    
     Ok(())
 }
 
-fn get_year_group_id(board: &monday::Board, year: &str) -> String {
-    if let Some(groups) = &board.groups {
-        for group in groups {
-            if group.title == year {
-                return group.id.clone();
-            }
-        }
-    }
-    // Fallback to a default group ID if not found
-    "new_group_mkkbbd2q".to_string()
-}
-
-fn show_graphql_mutations(actual_dates: &[NaiveDate], activity_type_value: &u8, customer: &Option<String>, work_item: &Option<String>, hours: Option<f64>, user_id: i64, user_name: &str, group_id: &str) {
-    println!("\n📋 GraphQL Mutations that would be executed:");
-    
+async fn create_items_on_monday(
+    client: &MondayClient,
+    actual_dates: &[NaiveDate],
+    activity_type_value: u8,
+    customer: &Option<String>,
+    work_item: &Option<String>,
+    hours: Option<f64>,
+    user_id: i64,
+    user_name: &str,
+    group_id: &str,
+) -> Result<()> {
     let board_id = "6500270039";
+    let mut successful_creations = 0;
+    
+    println!("\n🔄 Creating items on Monday.com...");
     
     for (i, date) in actual_dates.iter().enumerate() {
         let date_str = date.format("%Y-%m-%d").to_string();
@@ -275,30 +292,42 @@ fn show_graphql_mutations(actual_dates: &[NaiveDate], activity_type_value: &u8, 
             column_values["numbers__1"] = json!(h.to_string());
         }
         
-        let mutation = format!(
-            r#"// Mutation for {} ({} of {})
-mutation {{
-    create_item(
-        board_id: "{}",
-        group_id: "{}",
-        item_name: "{}",
-        column_values: "{}"
-    ) {{
-        id
-    }}
-}}
-"#,
-            date_str,
-            i + 1,
-            actual_dates.len(),
-            board_id,
-            group_id,
-            user_name,
-            column_values.to_string().replace('"', "\\\"")
-        );
+        println!("Creating item for {} ({} of {})...", date_str, i + 1, actual_dates.len());
         
-        println!("{}", mutation);
+        match client.create_item(board_id, group_id, user_name, &column_values).await {
+            Ok(item_id) => {
+                println!("✅ Successfully created item with ID: {}", item_id);
+                successful_creations += 1;
+            }
+            Err(e) => {
+                println!("❌ Failed to create item for {}: {}", date_str, e);
+                // Continue with other items even if one fails
+            }
+        }
+        
+        // Add a small delay to avoid rate limiting
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
     }
+    
+    println!("\n🎉 Successfully created {} out of {} items", successful_creations, actual_dates.len());
+    
+    if successful_creations < actual_dates.len() {
+        return Err(anyhow!("Some items failed to create. Check the errors above."));
+    }
+    
+    Ok(())
+}
+
+fn get_year_group_id(board: &monday::Board, year: &str) -> String {
+    if let Some(groups) = &board.groups {
+        for group in groups {
+            if group.title == year {
+                return group.id.clone();
+            }
+        }
+    }
+    // Fallback to a default group ID if not found
+    "new_group_mkkbbd2q".to_string()
 }
 
 async fn query_board(
