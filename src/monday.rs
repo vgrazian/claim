@@ -125,6 +125,10 @@ impl MondayClient {
     }
 
     pub async fn get_current_user(&self) -> Result<MondayUser> {
+        self.get_current_user_verbose(false).await
+    }
+
+    pub async fn get_current_user_verbose(&self, verbose: bool) -> Result<MondayUser> {
         let query = r#"
         {
             me {
@@ -135,15 +139,19 @@ impl MondayClient {
         }
         "#;
 
-        println!("Sending user query:\n{}", query);
+        if verbose {
+            println!("Sending user query:\n{}", query);
+        }
 
         let request_body = MondayRequest {
             query: query.to_string(),
         };
 
-        let response = self.send_request(request_body).await?;
+        let response = self.send_request(request_body, verbose).await?;
         
-        println!("User API response: {}", &response[..200.min(response.len())]);
+        if verbose {
+            println!("User API response: {}", &response[..200.min(response.len())]);
+        }
 
         let monday_response: MondayResponse = serde_json::from_str(&response)
             .map_err(|e| anyhow!("Failed to parse Monday.com user response: {}", e))?;
@@ -169,8 +177,21 @@ impl MondayClient {
         user_id: i64,
         limit: usize,
     ) -> Result<Board> {
+        self.query_board_verbose(board_id, group_name, user_id, limit, false).await
+    }
+
+    pub async fn query_board_verbose(
+        &self,
+        board_id: &str,
+        group_name: &str,
+        user_id: i64,
+        limit: usize,
+        verbose: bool,
+    ) -> Result<Board> {
         // First, let's get all groups to find the right one
-        println!("Getting board structure to find groups...");
+        if verbose {
+            println!("Getting board structure to find groups...");
+        }
         
         let query = format!(
             r#"
@@ -188,12 +209,16 @@ impl MondayClient {
             board_id
         );
 
-        println!("Sending board query:\n{}", query);
+        if verbose {
+            println!("Sending board query:\n{}", query);
+        }
 
         let request_body = MondayRequest { query };
-        let response = self.send_request(request_body).await?;
+        let response = self.send_request(request_body, verbose).await?;
 
-        println!("Board response: {}", &response[..500.min(response.len())]);
+        if verbose {
+            println!("Board response: {}", &response[..500.min(response.len())]);
+        }
 
         let monday_response: MondayResponse = serde_json::from_str(&response)
             .map_err(|e| anyhow!("Failed to parse board response: {}", e))?;
@@ -221,10 +246,14 @@ impl MondayClient {
             .map(|group| group.id.clone())
             .ok_or_else(|| anyhow!("Group '{}' not found in board {}", group_name, board_id))?;
 
-        println!("Found group '{}' with ID: {}", group_name, group_id);
+        if verbose {
+            println!("Found group '{}' with ID: {}", group_name, group_id);
+        }
 
         // Now get items with ALL column values (not just person column)
-        println!("\nGetting items with all column values...");
+        if verbose {
+            println!("\nGetting items with all column values...");
+        }
         let items_query = format!(
             r#"
         {{
@@ -250,12 +279,16 @@ impl MondayClient {
             board_id, group_id, 50
         );
 
-        println!("Sending items query:\n{}", items_query);
+        if verbose {
+            println!("Sending items query:\n{}", items_query);
+        }
 
         let items_request_body = MondayRequest { query: items_query };
-        let items_response = self.send_request(items_request_body).await?;
+        let items_response = self.send_request(items_request_body, verbose).await?;
 
-        println!("Items response: {}", &items_response[..500.min(items_response.len())]);
+        if verbose {
+            println!("Items response: {}", &items_response[..500.min(items_response.len())]);
+        }
 
         // Parse the response with better error handling
         let items_monday_response: Result<MondayResponse, _> = serde_json::from_str(&items_response);
@@ -263,7 +296,9 @@ impl MondayClient {
         let items_monday_response = match items_monday_response {
             Ok(response) => response,
             Err(e) => {
-                println!("Standard parsing failed: {}, trying manual extraction...", e);
+                if verbose {
+                    println!("Standard parsing failed: {}, trying manual extraction...", e);
+                }
                 manually_parse_response(&items_response).unwrap_or_else(|_| {
                     MondayResponse {
                         data: None,
@@ -297,8 +332,10 @@ impl MondayClient {
                 if let Some(items_page) = &mut group.items_page {
                     let original_count = items_page.items.len();
                     items_page.items.retain(|item| is_user_item(item, user_id));
-                    println!("Filtered {} items down to {} items for user {}", 
-                            original_count, items_page.items.len(), user_id);
+                    if verbose {
+                        println!("Filtered {} items down to {} items for user {}", 
+                                original_count, items_page.items.len(), user_id);
+                    }
                     
                     // Limit to the requested number of items
                     if items_page.items.len() > limit {
@@ -328,60 +365,83 @@ impl MondayClient {
         Ok(result_board)
     }
 
-// Update the create_item method in src/monday.rs
-pub async fn create_item(
-    &self,
-    board_id: &str,
-    group_id: &str,
-    item_name: &str,
-    column_values: &serde_json::Value,
-) -> Result<String> {
-    let query = format!(
-        r#"
-    mutation {{
-        create_item(
-            board_id: "{}",
-            group_id: "{}",
-            item_name: "{}",
-            column_values: "{}"
-        ) {{
-            id
+    pub async fn create_item(
+        &self,
+        board_id: &str,
+        group_id: &str,
+        item_name: &str,
+        column_values: &serde_json::Value,
+    ) -> Result<String> {
+        self.create_item_verbose(board_id, group_id, item_name, column_values, false).await
+    }
+
+    pub async fn create_item_verbose(
+        &self,
+        board_id: &str,
+        group_id: &str,
+        item_name: &str,
+        column_values: &serde_json::Value,
+        verbose: bool,
+    ) -> Result<String> {
+        let query = format!(
+            r#"
+        mutation {{
+            create_item(
+                board_id: "{}",
+                group_id: "{}",
+                item_name: "{}",
+                column_values: "{}"
+            ) {{
+                id
+            }}
         }}
-    }}
-    "#,
-        board_id,
-        group_id,
-        item_name,
-        column_values.to_string().replace('"', "\\\"")
-    );
+        "#,
+            board_id,
+            group_id,
+            item_name,
+            column_values.to_string().replace('"', "\\\"")
+        );
 
-    let request_body = MondayRequest {
-        query: query.to_string(),
-    };
+        if verbose {
+            println!("Sending create item mutation:\n{}", query);
+        }
 
-    let response = self.send_request(request_body).await?;
-    let monday_response: MondayResponse = serde_json::from_str(&response)
-        .map_err(|e| anyhow!("Failed to parse create item response: {}", e))?;
+        let request_body = MondayRequest {
+            query: query.to_string(),
+        };
 
-    if !monday_response.errors.is_empty() {
-        let error_messages: Vec<String> = monday_response.errors
-            .iter()
-            .map(|e| format!("{} (code: {})", e.message, e.error_code))
-            .collect();
-        return Err(anyhow!("Monday.com API errors: {}", error_messages.join(", ")));
+        let response = self.send_request(request_body, verbose).await?;
+        
+        if verbose {
+            println!("Create item response: {}", response);
+        }
+
+        let monday_response: MondayResponse = serde_json::from_str(&response)
+            .map_err(|e| anyhow!("Failed to parse create item response: {}", e))?;
+
+        if !monday_response.errors.is_empty() {
+            let error_messages: Vec<String> = monday_response.errors
+                .iter()
+                .map(|e| format!("{} (code: {})", e.message, e.error_code))
+                .collect();
+            return Err(anyhow!("Monday.com API errors: {}", error_messages.join(", ")));
+        }
+
+        // Parse the response to get the created item ID
+        if let Some(data) = monday_response.data {
+            // The response structure would need to be properly parsed based on the actual API response
+            // For now, we'll return a success message
+            Ok("success".to_string())
+        } else {
+            Err(anyhow!("No data returned from create item mutation"))
+        }
     }
 
-    // Parse the response to get the created item ID
-    if let Some(data) = monday_response.data {
-        // The response structure would need to be properly parsed based on the actual API response
-        // For now, we'll return a success message
-        Ok("success".to_string())
-    } else {
-        Err(anyhow!("No data returned from create item mutation"))
-    }
-}
-
-    async fn send_request(&self, request_body: MondayRequest) -> Result<String> {
+    async fn send_request(&self, request_body: MondayRequest, verbose: bool) -> Result<String> {
+        if verbose {
+            println!("Sending request to Monday.com API...");
+        }
+        
         let response = self.client
             .post("https://api.monday.com/v2")
             .header("Authorization", &self.api_key)
@@ -405,6 +465,11 @@ pub async fn create_item(
 
     pub async fn test_connection(&self) -> Result<()> {
         self.get_current_user().await?;
+        Ok(())
+    }
+
+    pub async fn test_connection_verbose(&self, verbose: bool) -> Result<()> {
+        self.get_current_user_verbose(verbose).await?;
         Ok(())
     }
 }

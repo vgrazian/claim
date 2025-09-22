@@ -29,6 +29,10 @@ enum Commands {
         /// Date to filter claims (YYYY-MM-DD, YYYY.MM.DD, or YYYY/MM/DD format)
         #[arg(short = 'D', long)]
         date: Option<String>,
+        
+        /// Verbose output
+        #[arg(short = 'v', long)]
+        verbose: bool,
     },
     /// Add a new claim
     Add {
@@ -55,6 +59,14 @@ enum Commands {
         /// Number of working days (default: 1, skips weekends)
         #[arg(short = 'd', long)]
         days: Option<f64>,
+        
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+        
+        /// Verbose output
+        #[arg(short = 'v', long)]
+        verbose: bool,
     },
 }
 
@@ -72,10 +84,19 @@ async fn main() {
 }
 
 async fn run(cli: Cli) -> Result<()> {
+    // Determine if verbose mode is enabled
+    let verbose = match &cli.command {
+        Some(Commands::Query { verbose, .. }) => *verbose,
+        Some(Commands::Add { verbose, .. }) => *verbose,
+        None => false,
+    };
+
     // Load configuration
     let config = match Config::load() {
         Ok(config) => {
-            println!("Loaded API key: {}", mask_api_key(&config.api_key));
+            if verbose {
+                println!("Loaded API key: {}", mask_api_key(&config.api_key));
+            }
             config
         }
         Err(_) => {
@@ -91,7 +112,7 @@ async fn run(cli: Cli) -> Result<()> {
             // Test the API key before saving
             println!("Testing connection to Monday.com...");
             let client = MondayClient::new(api_key);
-            match client.test_connection().await {
+            match client.test_connection_verbose(verbose).await {
                 Ok(_) => {
                     config.save()?;
                     println!("API key validated and saved successfully!");
@@ -105,7 +126,7 @@ async fn run(cli: Cli) -> Result<()> {
     };
 
     let client = MondayClient::new(config.api_key.clone());
-    let user = client.get_current_user().await?;
+    let user = client.get_current_user_verbose(verbose).await?;
     let current_year = get_current_year().to_string();
 
     // Print user info with year
@@ -114,12 +135,14 @@ async fn run(cli: Cli) -> Result<()> {
 
     // Handle commands
     match cli.command {
-        Some(Commands::Query { limit, date }) => {
-            println!("Querying board for user's items (limit: {})...", limit);
-            query_board(&client, &user, &current_year, limit, date).await?;
+        Some(Commands::Query { limit, date, verbose }) => {
+            if verbose {
+                println!("Querying board for user's items (limit: {})...", limit);
+            }
+            query_board(&client, &user, &current_year, limit, date, verbose).await?;
         }
-        Some(Commands::Add { date, activity_type, customer, work_item, hours, days }) => {
-            handle_add_command(&client, &user, &current_year, date, activity_type, customer, work_item, hours, days).await?;
+        Some(Commands::Add { date, activity_type, customer, work_item, hours, days, yes, verbose }) => {
+            handle_add_command(&client, &user, &current_year, date, activity_type, customer, work_item, hours, days, yes, verbose).await?;
         }
         None => {
             // Default action when no command is provided
@@ -140,6 +163,8 @@ async fn handle_add_command(
     work_item: Option<String>,
     hours: Option<f64>,
     days: Option<f64>,
+    yes: bool,
+    verbose: bool,
 ) -> Result<()> {
     let (final_date, final_activity_type, final_customer, final_work_item, final_hours, final_days, is_interactive) = 
         if date.is_none() && activity_type.is_none() && customer.is_none() && 
@@ -196,19 +221,30 @@ async fn handle_add_command(
     }
     
     // Get the current year's group ID from the board
-    let board = client.query_board("6500270039", current_year, user.id, 1).await?;
+    let board = client.query_board_verbose("6500270039", current_year, user.id, 1, verbose).await?;
     let group_id = get_year_group_id(&board, current_year);
     
-    // Ask for confirmation before proceeding
-    println!("\n🚀 Ready to create {} item(s) on Monday.com", actual_dates.len());
-    println!("Do you want to proceed? (y/N)");
+    if verbose {
+        println!("\n🔍 Verbose mode: Found group '{}' with ID: {}", current_year, group_id);
+        show_graphql_mutations(&actual_dates, &activity_type_value, &final_customer, &final_work_item, final_hours, user.id, &user.name, &group_id);
+    } else {
+        println!("\nFound group '{}' with ID: {}", current_year, group_id);
+    }
     
-    let mut confirmation = String::new();
-    io::stdin().read_line(&mut confirmation)?;
-    
-    if confirmation.trim().to_lowercase() != "y" {
-        println!("Operation cancelled.");
-        return Ok(());
+    // Ask for confirmation before proceeding (unless -y flag is used)
+    if !yes {
+        println!("\n🚀 Ready to create {} item(s) on Monday.com", actual_dates.len());
+        println!("Do you want to proceed? (y/N)");
+        
+        let mut confirmation = String::new();
+        io::stdin().read_line(&mut confirmation)?;
+        
+        if confirmation.trim().to_lowercase() != "y" {
+            println!("Operation cancelled.");
+            return Ok(());
+        }
+    } else {
+        println!("\n🚀 Creating {} item(s) on Monday.com (skipping confirmation)", actual_dates.len());
     }
     
     // Actually create the items on Monday.com
@@ -221,12 +257,13 @@ async fn handle_add_command(
         final_hours,
         user.id,
         &user.name,
-        &group_id
+        &group_id,
+        verbose
     ).await?;
     
     // If this was interactive mode, show the equivalent command line
     if is_interactive {
-        show_equivalent_command(&final_date, &activity_type_str, &final_customer, &final_work_item, final_hours, days_value);
+        show_equivalent_command(&final_date, &activity_type_str, &final_customer, &final_work_item, final_hours, days_value, yes, verbose);
     }
     
     Ok(())
@@ -242,6 +279,7 @@ async fn create_items_on_monday(
     user_id: i64,
     user_name: &str,
     group_id: &str,
+    verbose: bool,
 ) -> Result<()> {
     let board_id = "6500270039";
     let mut successful_creations = 0;
@@ -292,11 +330,36 @@ async fn create_items_on_monday(
             column_values["numbers__1"] = json!(h.to_string());
         }
         
+        if verbose {
+            println!("\n📋 GraphQL Mutation for {} ({} of {}):", date_str, i + 1, actual_dates.len());
+            let mutation = format!(
+                r#"mutation {{
+    create_item(
+        board_id: "{}",
+        group_id: "{}",
+        item_name: "{}",
+        column_values: "{}"
+    ) {{
+        id
+    }}
+}}"#,
+                board_id,
+                group_id,
+                user_name,
+                column_values.to_string().replace('"', "\\\"")
+            );
+            println!("{}", mutation);
+        }
+        
         println!("Creating item for {} ({} of {})...", date_str, i + 1, actual_dates.len());
         
-        match client.create_item(board_id, group_id, user_name, &column_values).await {
+        match client.create_item_verbose(board_id, group_id, user_name, &column_values, verbose).await {
             Ok(item_id) => {
-                println!("✅ Successfully created item with ID: {}", item_id);
+                if verbose {
+                    println!("✅ Successfully created item with response: {}", item_id);
+                } else {
+                    println!("✅ Successfully created item");
+                }
                 successful_creations += 1;
             }
             Err(e) => {
@@ -318,6 +381,81 @@ async fn create_items_on_monday(
     Ok(())
 }
 
+fn show_graphql_mutations(actual_dates: &[NaiveDate], activity_type_value: &u8, customer: &Option<String>, work_item: &Option<String>, hours: Option<f64>, user_id: i64, user_name: &str, group_id: &str) {
+    println!("\n📋 GraphQL Mutations that would be executed:");
+    
+    let board_id = "6500270039";
+    
+    for (i, date) in actual_dates.iter().enumerate() {
+        let date_str = date.format("%Y-%m-%d").to_string();
+        
+        let mut column_values = json!({});
+        
+        // Set person column
+        column_values["person"] = json!({
+            "personsAndTeams": [
+                {
+                    "id": user_id,
+                    "kind": "person"
+                }
+            ]
+        });
+        
+        // Set date column
+        column_values["date4"] = json!({
+            "date": date_str
+        });
+        
+        // Set activity type column
+        column_values["status"] = json!({
+            "index": activity_type_value
+        });
+        
+        // Set customer name if provided
+        if let Some(c) = customer {
+            if !c.is_empty() {
+                column_values["text__1"] = json!(c);
+            }
+        }
+        
+        // Set work item if provided
+        if let Some(wi) = work_item {
+            if !wi.is_empty() {
+                column_values["text8__1"] = json!(wi);
+            }
+        }
+        
+        // Set hours if provided
+        if let Some(h) = hours {
+            column_values["numbers__1"] = json!(h.to_string());
+        }
+        
+        let mutation = format!(
+            r#"// Mutation for {} ({} of {})
+mutation {{
+    create_item(
+        board_id: "{}",
+        group_id: "{}",
+        item_name: "{}",
+        column_values: "{}"
+    ) {{
+        id
+    }}
+}}
+"#,
+            date_str,
+            i + 1,
+            actual_dates.len(),
+            board_id,
+            group_id,
+            user_name,
+            column_values.to_string().replace('"', "\\\"")
+        );
+        
+        println!("{}", mutation);
+    }
+}
+
 fn get_year_group_id(board: &monday::Board, year: &str) -> String {
     if let Some(groups) = &board.groups {
         for group in groups {
@@ -336,6 +474,7 @@ async fn query_board(
     year: &str,
     limit: usize,
     date: Option<String>,
+    verbose: bool,
 ) -> Result<()> {
     let board_id = "6500270039";
     
@@ -348,24 +487,28 @@ async fn query_board(
         None
     };
     
-    if let Some(ref d) = normalized_date {
-        println!("Querying board {} for group '{}' with date filter: {}...", board_id, year, d);
-    } else {
-        println!("Querying board {} for group '{}'...", board_id, year);
+    if verbose {
+        if let Some(ref d) = normalized_date {
+            println!("Querying board {} for group '{}' with date filter: {}...", board_id, year, d);
+        } else {
+            println!("Querying board {} for group '{}'...", board_id, year);
+        }
     }
     
-    let board = client.query_board(board_id, year, user.id, limit).await?;
+    let board = client.query_board_verbose(board_id, year, user.id, limit, verbose).await?;
     
-    println!("\n=== Board: {} ===", board.name);
-    
-    // Display groups
-    println!("\nAvailable groups:");
-    if let Some(groups) = &board.groups {
-        for group in groups {
-            println!("  - {} (ID: {})", group.title, group.id);
+    if verbose {
+        println!("\n=== Board: {} ===", board.name);
+        
+        // Display groups
+        println!("\nAvailable groups:");
+        if let Some(groups) = &board.groups {
+            for group in groups {
+                println!("  - {} (ID: {})", group.title, group.id);
+            }
+        } else {
+            println!("  - No groups found in board");
         }
-    } else {
-        println!("  - No groups found in board");
     }
     
     // Display filtered items - look for any group that has items
@@ -506,7 +649,7 @@ fn calculate_working_dates(start_date: NaiveDate, target_days: i64) -> Vec<Naive
     dates
 }
 
-fn show_equivalent_command(date: &str, activity_type: &str, customer: &Option<String>, work_item: &Option<String>, hours: Option<f64>, days: f64) {
+fn show_equivalent_command(date: &str, activity_type: &str, customer: &Option<String>, work_item: &Option<String>, hours: Option<f64>, days: f64, yes: bool, verbose: bool) {
     println!("\n💡 Equivalent command line:");
     
     let mut command_parts = Vec::new();
@@ -536,6 +679,16 @@ fn show_equivalent_command(date: &str, activity_type: &str, customer: &Option<St
     // Only include days if it's not the default 1.0
     if (days - 1.0).abs() > f64::EPSILON {
         command_parts.push(format!("-d {}", days));
+    }
+    
+    // Include -y flag if it would be needed
+    if yes {
+        command_parts.push("-y".to_string());
+    }
+    
+    // Include -v flag if verbose
+    if verbose {
+        command_parts.push("-v".to_string());
     }
     
     println!("   {}", command_parts.join(" "));
