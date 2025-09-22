@@ -512,7 +512,7 @@ async fn query_board(
 }}
 "#,
                 board_id,
-                limit * 5, // Get more items to account for date filtering
+                500, // Increased limit to catch all possible items
                 user.name
             );
             println!("{}", graphql_query);
@@ -528,7 +528,8 @@ async fn query_board(
     }
     
     // Use a special method to query by user name instead of user ID
-    let items = client.query_items_by_user_name(board_id, "new_group_mkkbbd2q", &user.name, limit * 5, verbose).await?;
+    // Increased limit to 500 to catch all possible items
+    let items = client.query_items_by_user_name(board_id, "new_group_mkkbbd2q", &user.name, 500, verbose).await?;
     
     if verbose {
         println!("\n=== Raw items found for user: {} ===", items.len());
@@ -616,6 +617,11 @@ async fn query_board(
         println!("1. No items exist for this user");
         println!("2. Items exist but don't match the date filter");
         println!("3. The user name in Monday.com differs from '{}'", user.name);
+        
+        // If no items found with date filter, show how many total items exist for the user
+        if let Some(ref filter_date) = normalized_date {
+            println!("4. Total items found for user (without date filter): {}", items.len());
+        }
     }
     
     if let Some(ref filter_date) = normalized_date {
