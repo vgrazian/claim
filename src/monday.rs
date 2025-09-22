@@ -116,6 +116,90 @@ where
     }
 }
 
+// Helper function to extract items from the JSON response
+fn extract_items_from_response(value: &Value) -> Result<Vec<Item>> {
+    let mut items = Vec::new();
+
+    // Navigate through the nested structure: data -> boards -> groups -> items_page -> items
+    if let Some(data) = value.get("data") {
+        if let Some(boards) = data.get("boards").and_then(|b| b.as_array()) {
+            for board in boards {
+                if let Some(groups) = board.get("groups").and_then(|g| g.as_array()) {
+                    for group in groups {
+                        if let Some(items_page) = group.get("items_page") {
+                            if let Some(items_array) = items_page.get("items").and_then(|i| i.as_array()) {
+                                for item_val in items_array {
+                                    let item = parse_item(item_val)?;
+                                    items.push(item);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(items)
+}
+
+// Helper function to parse an individual item from JSON
+fn parse_item(item_val: &Value) -> Result<Item> {
+    let mut item = Item::default();
+
+    // Extract item ID
+    if let Some(id) = item_val.get("id").and_then(|id| id.as_str()) {
+        item.id = Some(id.to_string());
+    }
+
+    // Extract item name
+    if let Some(name) = item_val.get("name").and_then(|name| name.as_str()) {
+        item.name = Some(name.to_string());
+    }
+
+    // Extract column values
+    if let Some(columns_array) = item_val.get("column_values").and_then(|c| c.as_array()) {
+        for col_val in columns_array {
+            let mut column = ColumnValue::default();
+
+            // Extract column ID
+            if let Some(col_id) = col_val.get("id").and_then(|id| id.as_str()) {
+                column.id = Some(col_id.to_string());
+            }
+
+            // Extract column value
+            if let Some(value) = col_val.get("value") {
+                if value.is_string() {
+                    if let Some(value_str) = value.as_str() {
+                        column.value = Some(value_str.to_string());
+                    }
+                } else if value.is_null() {
+                    column.value = Some("null".to_string());
+                } else {
+                    column.value = Some(value.to_string());
+                }
+            }
+
+            // Extract column text
+            if let Some(text) = col_val.get("text") {
+                if text.is_string() {
+                    if let Some(text_str) = text.as_str() {
+                        column.text = Some(text_str.to_string());
+                    }
+                } else if text.is_null() {
+                    column.text = Some("null".to_string());
+                } else {
+                    column.text = Some(text.to_string());
+                }
+            }
+
+            item.column_values.push(column);
+        }
+    }
+
+    Ok(item)
+}
+
 impl MondayClient {
     pub fn new(api_key: String) -> Self {
         MondayClient {
@@ -428,13 +512,70 @@ impl MondayClient {
         }
 
         // Parse the response to get the created item ID
-        if let Some(data) = monday_response.data {
+        if monday_response.data.is_some() {
             // The response structure would need to be properly parsed based on the actual API response
             // For now, we'll return a success message
             Ok("success".to_string())
         } else {
             Err(anyhow!("No data returned from create item mutation"))
         }
+    }
+
+    pub async fn query_items_by_user_name(
+        &self,
+        board_id: &str,
+        group_id: &str,
+        user_name: &str,
+        limit: usize,
+        verbose: bool,
+    ) -> Result<Vec<Item>> {
+        let query = format!(
+            r#"
+        {{
+            boards(ids: ["{}"]) {{
+                groups(ids: ["{}"]) {{
+                    items_page(limit: {}, query_params: {{rules: [{{column_id: "name", compare_value: ["{}"]}}]}}) {{
+                        items {{
+                            id
+                            name
+                            column_values {{
+                                id
+                                value
+                                text
+                            }}
+                        }}
+                    }}
+                }}
+            }}
+        }}
+        "#,
+            board_id, group_id, limit, user_name
+        );
+
+        if verbose {
+            println!("Sending user name query:\n{}", query);
+        }
+
+        let request_body = MondayRequest { query };
+        let response = self.send_request(request_body, verbose).await?;
+
+        if verbose {
+            println!("User name query response: {}", &response[..500.min(response.len())]);
+        }
+
+        // Parse the response manually to handle the nested structure correctly
+        let value: Value = serde_json::from_str(&response)
+            .map_err(|e| anyhow!("Failed to parse JSON response: {}", e))?;
+
+        // Extract items from the nested JSON structure
+        let items = extract_items_from_response(&value)
+            .map_err(|e| anyhow!("Failed to extract items from response: {}", e))?;
+
+        if verbose {
+            println!("Successfully extracted {} items", items.len());
+        }
+
+        Ok(items)
     }
 
     async fn send_request(&self, request_body: MondayRequest, verbose: bool) -> Result<String> {

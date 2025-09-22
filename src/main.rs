@@ -2,7 +2,7 @@ mod config;
 mod monday;
 
 use config::Config;
-use monday::{MondayClient, MondayUser};
+use monday::{MondayClient, MondayUser, Item};
 use anyhow::{Result, anyhow};
 use std::process;
 use chrono::prelude::*;
@@ -139,7 +139,7 @@ async fn run(cli: Cli) -> Result<()> {
             if verbose {
                 println!("Querying board for user's items (limit: {})...", limit);
             }
-            query_board(&client, &user, &current_year, limit, date, verbose).await?;
+            query_board(&client, &user, limit, date, verbose).await?;
         }
         Some(Commands::Add { date, activity_type, customer, work_item, hours, days, yes, verbose }) => {
             handle_add_command(&client, &user, &current_year, date, activity_type, customer, work_item, hours, days, yes, verbose).await?;
@@ -471,7 +471,6 @@ fn get_year_group_id(board: &monday::Board, year: &str) -> String {
 async fn query_board(
     client: &MondayClient,
     user: &MondayUser,
-    year: &str,
     limit: usize,
     date: Option<String>,
     verbose: bool,
@@ -489,105 +488,190 @@ async fn query_board(
     
     if verbose {
         if let Some(ref d) = normalized_date {
-            println!("Querying board {} for group '{}' with date filter: {}...", board_id, year, d);
+            println!("Querying board {} for user '{}' with date filter: {}...", board_id, user.name, d);
+            
+            // Print the GraphQL query that would be used to filter by user name
+            println!("\n📋 GraphQL Query for testing in Monday.com sandbox:");
+            let graphql_query = format!(
+                r#"{{
+    boards(ids: ["{}"]) {{
+        groups(ids: ["new_group_mkkbbd2q"]) {{
+            items_page(limit: {}, query_params: {{rules: [{{column_id: "name", compare_value: ["{}"]}}]}}) {{
+                items {{
+                    id
+                    name
+                    column_values {{
+                        id
+                        value
+                        text
+                    }}
+                }}
+            }}
+        }}
+    }}
+}}
+"#,
+                board_id,
+                limit * 5, // Get more items to account for date filtering
+                user.name
+            );
+            println!("{}", graphql_query);
+            
+            println!("\n💡 To test this query:");
+            println!("1. Go to https://api.monday.com/v2/playground");
+            println!("2. Paste the query above");
+            println!("3. The results will show all items for user '{}'", user.name);
+            println!("4. Look for items where column_values.id = 'date4' contains '{}'", d);
         } else {
-            println!("Querying board {} for group '{}'...", board_id, year);
+            println!("Querying board {} for user '{}'...", board_id, user.name);
         }
     }
     
-    let board = client.query_board_verbose(board_id, year, user.id, limit, verbose).await?;
+    // Use a special method to query by user name instead of user ID
+    let items = client.query_items_by_user_name(board_id, "new_group_mkkbbd2q", &user.name, limit * 5, verbose).await?;
     
     if verbose {
-        println!("\n=== Board: {} ===", board.name);
-        
-        // Display groups
-        println!("\nAvailable groups:");
-        if let Some(groups) = &board.groups {
-            for group in groups {
-                println!("  - {} (ID: {})", group.title, group.id);
-            }
-        } else {
-            println!("  - No groups found in board");
-        }
+        println!("\n=== Raw items found for user: {} ===", items.len());
     }
     
-    // Display filtered items - look for any group that has items
-    let mut found_items = false;
-    if let Some(groups) = &board.groups {
-        for group in groups {
-            if let Some(ref items_page) = group.items_page {
-                if !items_page.items.is_empty() {
-                    found_items = true;
-                    println!("\n=== FILTERED ITEMS for User {} ===", user.name);
-                    
-                    // Show date filter info if applicable
-                    if let Some(ref filter_date) = normalized_date {
-                        println!("Date filter: {}", filter_date);
-                    }
-                    
-                    println!("Found {} items for user {} in group '{}':", 
-                            items_page.items.len(), user.name, group.title);
-                    
-                    for (index, item) in items_page.items.iter().enumerate() {
-                        let item_name = item.name.as_deref().unwrap_or("Unnamed");
-                        let item_id = item.id.as_deref().unwrap_or("Unknown");
-                        println!("\n{}. {} (ID: {})", index + 1, item_name, item_id);
+    // Filter items by date if date filter is provided
+    let filtered_items: Vec<&Item> = if let Some(ref filter_date) = normalized_date {
+        items.iter()
+            .filter(|item| is_item_matching_date(item, filter_date))
+            .collect()
+    } else {
+        items.iter().collect()
+    };
+    
+    let limited_items: Vec<&Item> = filtered_items.iter().take(limit).cloned().collect();
+    let limited_items_len = limited_items.len();
+    let filtered_items_len = filtered_items.len();
+    
+    if verbose {
+        println!("\n=== Filtered items matching date criteria: {} ===", filtered_items_len);
+    }
+    
+    // Display the results in a clean table format
+    if !limited_items.is_empty() {
+        println!("\n=== FILTERED ITEMS for User {} ===", user.name);
+        
+        // Show date filter info if applicable
+        if let Some(ref filter_date) = normalized_date {
+            println!("Date filter: {}", filter_date);
+        }
+        
+        println!("Found {} items for user {}:", filtered_items_len, user.name);
+        
+        for (index, item) in limited_items.iter().enumerate() {
+            let item_name = item.name.as_deref().unwrap_or("Unnamed");
+            let item_id = item.id.as_deref().unwrap_or("Unknown");
+            println!("\n{}. {} (ID: {})", index + 1, item_name, item_id);
+            
+            // Display column values with titles in a formatted way
+            if !item.column_values.is_empty() {
+                println!("   Columns:");
+                // Find the maximum column title length for formatting
+                let max_title_len = item.column_values.iter()
+                    .map(|col| {
+                        let col_id = col.id.as_deref().unwrap_or("");
+                        map_column_title(col_id).len()
+                    })
+                    .max()
+                    .unwrap_or(0);
+                
+                for col in &item.column_values {
+                    if let Some(col_id) = &col.id {
+                        let column_title = map_column_title(col_id);
                         
-                        // Display column values with titles in a formatted way
-                        if !item.column_values.is_empty() {
-                            println!("   Columns:");
-                            // Find the maximum column title length for formatting
-                            let max_title_len = item.column_values.iter()
-                                .map(|col| {
-                                    let col_id = col.id.as_deref().unwrap_or("");
-                                    map_column_title(col_id).len()
-                                })
-                                .max()
-                                .unwrap_or(0);
-                            
-                            for col in &item.column_values {
-                                if let Some(col_id) = &col.id {
-                                    let column_title = map_column_title(col_id);
-                                    
-                                    if let Some(value) = &col.value {
-                                        if value != "null" && !value.is_empty() {
-                                            // Format with aligned columns
-                                            println!("     {:<width$} : {}", column_title, value, width = max_title_len);
-                                        }
-                                    } else if let Some(text) = &col.text {
-                                        if !text.is_empty() && text != "null" {
-                                            // Format with aligned columns
-                                            println!("     {:<width$} : {}", column_title, text, width = max_title_len);
-                                        }
-                                    }
-                                }
+                        if let Some(value) = &col.value {
+                            if value != "null" && !value.is_empty() {
+                                // Format with aligned columns
+                                println!("     {:<width$} : {}", column_title, value, width = max_title_len);
                             }
-                        } else {
-                            println!("   No column values available");
+                        } else if let Some(text) = &col.text {
+                            if !text.is_empty() && text != "null" {
+                                // Format with aligned columns
+                                println!("     {:<width$} : {}", column_title, text, width = max_title_len);
+                            }
                         }
                     }
-                    break; // Only show the first group with items
                 }
+            } else {
+                println!("   No column values available");
             }
         }
-    }
-    
-    if !found_items {
-        println!("\nNo items found for user {} in any group.", user.name);
+        
+        // Show limit message if there are more items than the limit
+        if filtered_items_len > limit {
+            println!("\n... and {} more items (showing first {} items)", 
+                   filtered_items_len - limit, limit);
+        }
+        
+    } else {
+        println!("\nNo items found for user '{}'", user.name);
         if let Some(ref filter_date) = normalized_date {
             println!("Date filter: {}", filter_date);
         }
         println!("This means either:");
-        println!("1. No items exist in any group");
-        println!("2. Items exist but none are assigned to user ID {}", user.id);
-        if let Some(_) = normalized_date {
-            println!("3. No items match the date filter");
-        } else {
-            println!("3. The person column uses a different format than expected");
-        }
+        println!("1. No items exist for this user");
+        println!("2. Items exist but don't match the date filter");
+        println!("3. The user name in Monday.com differs from '{}'", user.name);
+    }
+    
+    if let Some(ref filter_date) = normalized_date {
+        println!("\n✅ Found {} total items matching date filter: {}", filtered_items_len, filter_date);
     }
     
     Ok(())
+}
+
+// Helper function to map activity type value back to name
+fn map_activity_value_to_name(value: u8) -> String {
+    match value {
+        0 => "vacation".to_string(),
+        1 => "billable".to_string(),
+        2 => "holding".to_string(),
+        3 => "education".to_string(),
+        4 => "work_reduction".to_string(),
+        5 => "tbd".to_string(),
+        6 => "holiday".to_string(),
+        7 => "presales".to_string(),
+        8 => "illness".to_string(),
+        9 => "boh1".to_string(),
+        10 => "boh2".to_string(),
+        11 => "boh3".to_string(),
+        _ => format!("unknown({})", value),
+    }
+}
+
+// Helper function to check if an item matches the specified date
+fn is_item_matching_date(item: &Item, target_date: &str) -> bool {
+    for col in &item.column_values {
+        if let Some(col_id) = &col.id {
+            if col_id == "date4" {
+                // Parse the date column value to check if it matches the target date
+                if let Some(value) = &col.value {
+                    if let Ok(parsed_value) = serde_json::from_str::<serde_json::Value>(value) {
+                        if let Some(date_obj) = parsed_value.get("date") {
+                            if let Some(date_str) = date_obj.as_str() {
+                                // Compare the date part only (ignore time if present)
+                                if date_str.starts_with(target_date) {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+                // Also check the text field as fallback
+                if let Some(text) = &col.text {
+                    if text.starts_with(target_date) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
 }
 
 fn map_column_title(column_id: &str) -> &str {
