@@ -2,64 +2,67 @@
 
 A command-line application for processing claims with API key authentication.
 
-## Features
+## NAME
 
-- Secure API key storage in system configuration directory
-- Interactive setup for first-time users
-- Automatic API key loading for subsequent uses
-- Masked API key display for security
-- Query a specific date
-- ad a single entry or multiple dates
+claim - Monday.com claim management tool
 
-# Monday.com Integration
+## SYNOPSIS
 
-This application connects to Monday.com using your API key to retrieve user information and verify authentication.
+**claim** [*OPTIONS*]
 
-## Getting Your Monday.com API Key
+**claim** **query** [*QUERY_OPTIONS*]
+
+**claim** **add** [*ADD_OPTIONS*]
+
+## DESCRIPTION
+
+**claim** is a command-line application for processing claims with Monday.com API integration. It provides secure API key storage, interactive setup, and functionality to query and add claim entries to Monday.com boards.
+
+The application automatically handles API key validation, stores credentials securely in the system configuration directory, and provides both interactive and command-line modes for claim management.
+
+## FIRST-TIME SETUP
+
+On first execution, the application will prompt for a Monday.com API key:
+
+```bash
+cargo run
+# or if built:
+./target/release/claim
+```
+
+**Output:**
+```text
+No API key found. Let's set one up!
+Please enter your API key:
+[your input here]
+API key saved successfully!
+```
+
+### Getting Your Monday.com API Key
 
 1. Log in to your Monday.com account
 2. Go to https://your-account.monday.com/admin/integrations/api
 3. Generate a new API key or use an existing one
 4. Copy the API key when prompted by the application
 
-## API Key Validation
+### API Key Validation
 
 The application validates your API key by:
 1. Testing the connection to Monday.com's API
 2. Retrieving your user information (ID, name, email)
 3. Only saving the API key if validation succeeds
 
-## API Permissions
+### API Permissions
 
 Your Monday.com API key needs the following permissions:
 - Read access to user information
 - Access to the GraphQL API
 
-## Error Handling
+## USAGE
 
-If you encounter connection errors:
-1. Verify your API key is correct
-2. Check your internet connection
-3. Ensure your Monday.com account is active
-4. Verify API key permissions
+### Subsequent Runs
 
-## Installation
-
-### Prerequisites
-- Rust and Cargo installed on your system
-
-### Building from Source
-```bash
-git clone https://github.com/vgrazian/claim.git
-cd claim
-cargo build --release
-```
-
-The binary will be available at target/release/claim
-
-# Usage
-## First Run
-On the first execution, the application will prompt you to enter an API key:
+After the initial setup, the application will automatically use the stored API key:
 
 ```bash
 cargo run
@@ -67,39 +70,35 @@ cargo run
 ./target/release/claim
 ```
 
-### Output
+**Output:**
 ```text
-No API key found. Let's set one up!
-Please enter your API key:
-[your input here]
-API key saved successfully!
-Using API key for claims processing...
-Processing claims with API key: your******
-Claims processed successfully!
-```
-
-## Subsequent Runs
-After the initial setup, the application will automatically use the stored API key. If the API key needs to be changed you will need to manually delete the config file.
-
-```bash
-cargo run
-# or if built:
-./target/release/claim
-```
-### Output:
-```text
-Running for user id *****, user name ****** ******, email ******** for year ####
+Running for user id *****, user name ***** *****, email ******** for year ####
 No command specified. Use --help for available commands.
 ```
 
-## Query entries for you on a specific date
+## COMMANDS
+
+### query
+
+Query claims from Monday.com board.
+
+```bash
+claim query [--date DATE] [--limit LIMIT] [-v]
+```
+
+**Options:**
+- `-D, --date DATE`: Date to filter claims (YYYY-MM-DD, YYYY.MM.DD, or YYYY/MM/DD format)
+- `--limit LIMIT`: Number of rows to display (default: 5)
+- `-v, --verbose`: Verbose output
+
+**Example:**
 ```bash
 cargo run -- query -D 2025-09-15
 # or if built:
 ./target/release/claim query -D 2025-09-15
 ```
 
-### Output:
+**Output:**
 ```text
 Running for user id ****, user name *** ****, email *** for year ###
 
@@ -120,17 +119,34 @@ Found 1 items for user **** *****:
 ✅ Found 1 total items matching date filter: 2025-09-15
 ```
 
-This shows you have an entry on the date specified and provides customer name, work item and number of hours.
+### add
 
+Add a new claim entry.
 
-## Add one or more entries on a date - interactive mode
+```bash
+claim add [--date DATE] [--activity-type TYPE] [--customer CUSTOMER] [--work-item WORK_ITEM] [--hours HOURS] [--days DAYS] [-y] [-v]
+```
+
+**Options:**
+- `-D, --date DATE`: Date (YYYY-MM-DD format, defaults to today)
+- `-t, --activity-type TYPE`: Activity type: vacation, billable, holding, education, work_reduction, tbd, holiday, presales, illness, boh1, boh2, boh3 (default: billable)
+- `-c, --customer CUSTOMER`: Customer name
+- `-w, --work-item WORK_ITEM`: Work item
+- `-H, --hours HOURS`: Number of hours worked
+- `-d, --days DAYS`: Number of working days (default: 1, skips weekends)
+- `-y, --yes`: Skip confirmation prompt
+- `-v, --verbose`: Verbose output
+
+**Interactive Mode:**
+If no options are provided, the command runs in interactive mode:
+
 ```bash
 cargo run -- add
 # or if built:
 ./target/release/claim add
 ```
 
-### Output:
+**Output:**
 ```text
 Running for user id ***, user name *** ***, email *** for year ####
 
@@ -175,67 +191,107 @@ Creating item for 2025-09-23 (1 of 1)...
    claim add -D 2025-09-23 -c "CUST-NAME" -w "WI.12344" -H 1
 ```
 
-This asks interactively a set of questions and defaults to today's date, billable and 1 day to add.
-The last line provided is the commandline you would use to add the same entry directly.
+## EXAMPLES
 
+### Query claims for a specific date:
+```bash
+claim query -D 2025-09-15
+```
 
-## Command line parameters
-### add function
--D Day (any ISO format value is accepted, you can use '-', '/' or '.'.).
--c Customer Name
--w Work Item
--H number of hours worked
--d number of repeated days (note: this will skip weekends, so if you select 7 it will add 7 entries skipping saturdays and sundays
--y skip confirmation
+### Add a single claim entry:
+```bash
+claim add -D 2025-09-23 -c "Customer Name" -w "WI.12344" -H 8
+```
 
-### query function
--D Day (any ISO format value is accepted, you can use '-', '/' or '.'.).
+### Add multiple days of claims:
+```bash
+claim add -D 2025-09-23 -c "Customer" -w "PROJ-123" -H 8 -d 5
+```
 
-# Configuration File Location
-The API key is stored in a JSON configuration file. The location varies by operating system.
+### Add claim non-interactively:
+```bash
+claim add -D 2025-09-23 -c "Customer" -w "ITEM-456" -H 6 -y
+```
 
-## Linux
-```Linux
+### Verbose query with increased limit:
+```bash
+claim query -D 2025-09-15 --limit 20 -v
+```
+
+## CONFIGURATION FILE LOCATION
+
+The API key is stored in a JSON configuration file. The location varies by operating system:
+
+### Linux
+```
 ~/.config/claim/config.json
 ```
 
-## macOS
-``` Linux
+### macOS
+```
 ~/Library/Application Support/com.yourname.claim/config.json
 ```
 
-## Windows
-``` Linux
-C:\Users\Username\AppData\Roaming\yourname\claim\config\config.json
-Linux
+### Windows
+```
+C:UsersUsernameAppDataRoamingyournameclaimconfigconfig.json
 ```
 
-# Security Notes
-The API key is stored in plain text (though in a protected system directory)
-When displayed, only the first 4 characters are shown, followed by asterisks
-The config file is created with standard file permissions for your user account
+## SECURITY NOTES
 
+- The API key is stored in plain text (though in a protected system directory)
+- When displayed, only the first 4 characters are shown, followed by asterisks
+- The config file is created with standard file permissions for your user account
+- API keys are validated before being saved to ensure they work with Monday.com
+- If you need to change your API key, you must manually delete the configuration file
 
-# Development
-## Building
+## ERROR HANDLING
+
+If you encounter connection errors:
+1. Verify your API key is correct
+2. Check your internet connection
+3. Ensure your Monday.com account is active
+4. Verify API key permissions
+5. Check that the Monday.com board structure matches expected format
+
+## INSTALLATION
+
+### Prerequisites
+- Rust and Cargo installed on your system
+
+### Building from Source
+```bash
+git clone https://github.com/vgrazian/claim.git
+cd claim
+cargo build --release
+```
+
+The binary will be available at `target/release/claim`
+
+## DEVELOPMENT
+
+### Building
 ```bash
 cargo build
 ```
-## Running Tests
+
+### Running Tests
 ```bash
 cargo test
 ```
-## Running in Debug Mode
+
+### Running in Debug Mode
 ```bash
 cargo run
 ```
-## Building for Release
+
+### Building for Release
 ```bash
 cargo build --release
 ```
 
-# Project Structure
-```text
+## PROJECT STRUCTURE
+```
 claim/
 ├── src/
 │   ├── main.rs      # Main application entry point
@@ -244,8 +300,24 @@ claim/
 └── README.md        # This file
 ```
 
-# Dependencies
-serde - Serialization/deserialization framework
-serde_json - JSON support for Serde
-directories - Cross-platform directory location handling
+## DEPENDENCIES
 
+- **serde** - Serialization/deserialization framework
+- **serde_json** - JSON support for Serde
+- **directories** - Cross-platform directory location handling
+- **reqwest** - HTTP client for API calls
+- **tokio** - Async runtime
+- **anyhow** - Error handling
+- **chrono** - Date/time handling
+- **clap** - Command-line argument parsing
+
+## Monday.com Integration
+
+This application connects to Monday.com using your API key to retrieve user information and verify authentication. It specifically works with boards that have the following column structure:
+- Person column (user assignment)
+- Date column (claim date)
+- Status column (activity type)
+- Text columns (customer, work item)
+- Numbers column (hours)
+
+The application automatically handles weekend skipping when adding multiple days and provides comprehensive error handling for API interactions.
