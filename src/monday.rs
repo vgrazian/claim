@@ -726,3 +726,70 @@ fn is_user_item(item: &Item, user_id: i64) -> bool {
     }
     false
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_monday_client_new() {
+        let client = MondayClient::new("test-key".to_string());
+        assert_eq!(client.api_key, "test-key");
+    }
+
+    #[test]
+    fn test_deserialize_id_from_string() {
+        let json_string = r#"{"id": "123"}"#;
+        #[derive(Deserialize)]
+        struct TestStruct {
+            #[serde(deserialize_with = "deserialize_id")]
+            id: i64,
+        }
+        
+        let result: Result<TestStruct, _> = serde_json::from_str(json_string);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().id, 123);
+    }
+
+    #[test]
+    fn test_deserialize_id_from_number() {
+        let json_number = r#"{"id": 123}"#;
+        #[derive(Deserialize)]
+        struct TestStruct {
+            #[serde(deserialize_with = "deserialize_id")]
+            id: i64,
+        }
+        
+        let result: Result<TestStruct, _> = serde_json::from_str(json_number);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().id, 123);
+    }
+
+    #[test]
+    fn test_deserialize_string_id_from_string() {
+        let json_string = r#"{"id": "test_id"}"#;
+        #[derive(Deserialize)]
+        struct TestStruct {
+            #[serde(deserialize_with = "deserialize_string_id")]
+            id: String,
+        }
+        
+        let result: Result<TestStruct, _> = serde_json::from_str(json_string);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().id, "test_id");
+    }
+
+    #[test]
+    fn test_deserialize_string_id_from_number() {
+        let json_number = r#"{"id": 123}"#;
+        #[derive(Deserialize)]
+        struct TestStruct {
+            #[serde(deserialize_with = "deserialize_string_id")]
+            id: String,
+        }
+        
+        let result: Result<TestStruct, _> = serde_json::from_str(json_number);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().id, "123");
+    }
+}

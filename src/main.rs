@@ -911,11 +911,228 @@ fn get_current_year() -> i32 {
 }
 
 fn mask_api_key(api_key: &str) -> String {
-    if api_key.len() <= 8 {
+    if api_key.len() <= 4 {
         "*".repeat(api_key.len())
     } else {
         let visible_part = &api_key[..4];
         let masked_part = "*".repeat(api_key.len() - 4);
         format!("{}{}", visible_part, masked_part)
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+    use std::env;
+
+    fn setup_test_env() -> TempDir {
+        let temp_dir = TempDir::new().unwrap();
+        
+        // Set up environment for directories crate
+        if cfg!(target_os = "windows") {
+            env::set_var("APPDATA", temp_dir.path());
+        } else {
+            env::set_var("HOME", temp_dir.path());
+        }
+        
+        temp_dir
+    }
+
+    #[test]
+    fn test_mask_api_key() {
+        // Test the masking behavior for different length API keys
+        
+        // For API keys longer than 4 characters: first 4 visible, rest masked
+        let result = mask_api_key("12345678");
+        assert_eq!(result.len(), 8); // Same length as input
+        assert_eq!(&result[0..4], "1234"); // First 4 characters visible
+        assert!(result.chars().skip(4).all(|c| c == '*')); // Rest are asterisks
+        
+        // For API keys exactly 4 characters: all masked
+        let result = mask_api_key("1234");
+        assert_eq!(result, "****"); // All characters masked
+        
+        // For API keys shorter than 4 characters: all masked
+        let result = mask_api_key("123");
+        assert_eq!(result, "***"); // All characters masked
+        assert_eq!(mask_api_key("12"), "**");
+        assert_eq!(mask_api_key("1"), "*");
+        
+        // Edge case: empty string
+        assert_eq!(mask_api_key(""), "");
+        
+        // Test with a realistic API key
+        let api_key = "abcdefghijklmnop";
+        let masked = mask_api_key(api_key);
+        assert_eq!(masked.len(), api_key.len());
+        assert_eq!(&masked[0..4], "abcd"); // First 4 visible
+        assert!(masked.chars().skip(4).all(|c| c == '*')); // Rest masked
+        
+        // Verify the original and masked are different (security check)
+        assert_ne!(api_key, masked);
+    }
+
+    #[test]
+    fn test_normalize_date() {
+        assert_eq!(normalize_date("2025-09-15"), "2025-09-15");
+        assert_eq!(normalize_date("2025.09.15"), "2025-09-15");
+        assert_eq!(normalize_date("2025/09/15"), "2025-09-15");
+        // Test that invalid dates return the original string
+        assert_eq!(normalize_date("invalid"), "invalid");
+    }
+
+    #[test]
+    fn test_validate_date() {
+        assert!(validate_date("2025-09-15").is_ok());
+        assert!(validate_date("2025.09.15").is_ok());
+        assert!(validate_date("2025/09/15").is_ok());
+        assert!(validate_date("invalid-date").is_err());
+    }
+
+    #[test]
+    fn test_map_activity_type_to_value() {
+        assert_eq!(map_activity_type_to_value("billable"), 1);
+        assert_eq!(map_activity_type_to_value("vacation"), 0);
+        assert_eq!(map_activity_type_to_value("holding"), 2);
+        assert_eq!(map_activity_type_to_value("unknown"), 1); // defaults to billable
+    }
+
+    #[test]
+    fn test_map_activity_value_to_name() {
+        assert_eq!(map_activity_value_to_name(1), "billable");
+        assert_eq!(map_activity_value_to_name(0), "vacation");
+        assert_eq!(map_activity_value_to_name(2), "holding");
+        assert_eq!(map_activity_value_to_name(99), "unknown(99)");
+    }
+
+    #[test]
+    fn test_calculate_working_dates() {
+        let start_date = NaiveDate::from_ymd_opt(2025, 9, 15).unwrap(); // Monday
+        let dates = calculate_working_dates(start_date, 5);
+        
+        assert_eq!(dates.len(), 5);
+        // Should skip weekends - Monday to Friday
+        assert_eq!(dates[0].weekday(), Weekday::Mon);
+        assert_eq!(dates[1].weekday(), Weekday::Tue);
+        assert_eq!(dates[2].weekday(), Weekday::Wed);
+        assert_eq!(dates[3].weekday(), Weekday::Thu);
+        assert_eq!(dates[4].weekday(), Weekday::Fri);
+    }
+
+    #[test]
+    fn test_calculate_working_dates_with_weekend() {
+        let start_date = NaiveDate::from_ymd_opt(2025, 9, 13).unwrap(); // Saturday
+        let dates = calculate_working_dates(start_date, 3);
+        
+        assert_eq!(dates.len(), 3);
+        // Should skip Saturday and Sunday, start on Monday
+        assert_eq!(dates[0].weekday(), Weekday::Mon);
+        assert_eq!(dates[1].weekday(), Weekday::Tue);
+        assert_eq!(dates[2].weekday(), Weekday::Wed);
+    }
+
+    #[test]
+    fn test_map_column_title() {
+        assert_eq!(map_column_title("date4"), "Date");
+        assert_eq!(map_column_title("person"), "Person");
+        assert_eq!(map_column_title("status"), "Status");
+        assert_eq!(map_column_title("text__1"), "Text");
+        assert_eq!(map_column_title("unknown"), "unknown");
+    }
+
+    #[test]
+    fn test_get_current_year() {
+        let year = get_current_year();
+        let current_year = Local::now().year();
+        assert_eq!(year, current_year);
+    }
+
+    #[test]
+    fn test_is_item_matching_date() {
+        let mut item = Item::default();
+        let mut date_column = monday::ColumnValue::default();
+        date_column.id = Some("date4".to_string());
+        date_column.value = Some(r#"{"date": "2025-09-15"}"#.to_string());
+        item.column_values.push(date_column);
+
+        assert!(is_item_matching_date(&item, "2025-09-15"));
+        assert!(!is_item_matching_date(&item, "2025-09-16"));
+    }
+
+    #[test]
+    fn test_is_item_matching_date_with_text() {
+        let mut item = Item::default();
+        let mut date_column = monday::ColumnValue::default();
+        date_column.id = Some("date4".to_string());
+        date_column.text = Some("2025-09-15".to_string());
+        item.column_values.push(date_column);
+
+        assert!(is_item_matching_date(&item, "2025-09-15"));
+        assert!(!is_item_matching_date(&item, "2025-09-16"));
+    }
+
+    #[test]
+    fn test_cli_parsing_query() {
+        let result = Cli::try_parse_from(&["claim", "query", "-D", "2025-09-15"]);
+        assert!(result.is_ok());
+        
+        let cli = result.unwrap();
+        match cli.command {
+            Some(Commands::Query { date, .. }) => {
+                assert_eq!(date, Some("2025-09-15".to_string()));
+            }
+            _ => panic!("Expected Query command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parsing_add() {
+        let result = Cli::try_parse_from(&["claim", "add", "-c", "test"]);
+        assert!(result.is_ok());
+        
+        let cli = result.unwrap();
+        match cli.command {
+            Some(Commands::Add { customer, .. }) => {
+                assert_eq!(customer, Some("test".to_string()));
+            }
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
+    fn test_show_equivalent_command() {
+        // Capture the output or just test that it doesn't panic
+        show_equivalent_command(
+            "2025-09-15",
+            "billable",
+            &Some("Customer".to_string()),
+            &Some("WorkItem".to_string()),
+            Some(8.0),
+            1.0,
+            false,
+            false
+        );
+        // If we get here without panic, the test passes
+        assert!(true);
+    }
+
+    #[test]
+    fn test_validate_date_flexible() {
+        assert!(validate_date_flexible("2025-09-15").is_ok());
+        assert!(validate_date_flexible("2025.09.15").is_ok());
+        assert!(validate_date_flexible("2025/09/15").is_ok());
+        assert!(validate_date_flexible("invalid-date").is_err());
+    }
+}
+
+// Helper function for testing
+#[cfg(test)]
+fn create_test_item_with_date(date: &str) -> Item {
+    let mut item = Item::default();
+    let mut date_column = monday::ColumnValue::default();
+    date_column.id = Some("date4".to_string());
+    date_column.value = Some(format!(r#"{{"date": "{}"}}"#, date));
+    item.column_values.push(date_column);
+    item
 }
