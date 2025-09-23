@@ -67,7 +67,7 @@ cargo run
 ./target/release/claim
 ```
 
-## Output
+### Output
 ```text
 No API key found. Let's set one up!
 Please enter your API key:
@@ -86,7 +86,7 @@ cargo run
 # or if built:
 ./target/release/claim
 ```
-## Output:
+### Output:
 ```text
 Running for user id *****, user name ****** ******, email ******** for year ####
 No command specified. Use --help for available commands.
@@ -99,7 +99,7 @@ cargo run -- query -D 2025-09-15
 ./target/release/claim query -D 2025-09-15
 ```
 
-## Output:
+### Output:
 ```text
 Running for user id ****, user name *** ****, email *** for year ###
 
@@ -130,7 +130,7 @@ cargo run -- add
 ./target/release/claim add
 ```
 
-## Output:
+### Output:
 ```text
 Running for user id ***, user name *** ***, email *** for year ####
 
@@ -180,6 +180,7 @@ The last line provided is the commandline you would use to add the same entry di
 
 
 ## Command line parameters
+### add function
 -D Day (any ISO format value is accepted, you can use '-', '/' or '.'.).
 -c Customer Name
 -w Work Item
@@ -187,7 +188,8 @@ The last line provided is the commandline you would use to add the same entry di
 -d number of repeated days (note: this will skip weekends, so if you select 7 it will add 7 entries skipping saturdays and sundays
 -y skip confirmation
 
-
+### query function
+-D Day (any ISO format value is accepted, you can use '-', '/' or '.'.).
 
 # Configuration File Location
 The API key is stored in a JSON configuration file. The location varies by operating system.
