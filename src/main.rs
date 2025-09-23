@@ -30,6 +30,10 @@ enum Commands {
         #[arg(short = 'D', long)]
         date: Option<String>,
         
+        /// Number of days to query (default: 1, skips weekends)
+        #[arg(short = 'd', long, default_value_t = 1)]
+        days: usize,
+        
         /// Verbose output
         #[arg(short = 'v', long)]
         verbose: bool,
@@ -135,11 +139,11 @@ async fn run(cli: Cli) -> Result<()> {
 
     // Handle commands
     match cli.command {
-        Some(Commands::Query { limit, date, verbose }) => {
+        Some(Commands::Query { limit, date, days, verbose }) => {
             if verbose {
-                println!("Querying board for user's items (limit: {})...", limit);
+                println!("Querying board for user's items (limit: {}, days: {})...", limit, days);
             }
-            query_board(&client, &user, limit, date, verbose).await?;
+            query_board(&client, &user, limit, date, days, verbose).await?;
         }
         Some(Commands::Add { date, activity_type, customer, work_item, hours, days, yes, verbose }) => {
             handle_add_command(&client, &user, &current_year, date, activity_type, customer, work_item, hours, days, yes, verbose).await?;
@@ -473,55 +477,42 @@ async fn query_board(
     user: &MondayUser,
     limit: usize,
     date: Option<String>,
+    days: usize,
     verbose: bool,
 ) -> Result<()> {
     let board_id = "6500270039";
     
     // Handle date filtering if provided
-    let normalized_date = if let Some(ref date_str) = date {
+    let (start_date, target_days) = if let Some(ref date_str) = date {
         // Validate the date format
         validate_date(date_str)?;
-        Some(normalize_date(date_str))
+        let normalized_date = normalize_date(date_str);
+        let start_date = chrono::NaiveDate::parse_from_str(&normalized_date, "%Y-%m-%d")?;
+        (Some(start_date), days)
     } else {
-        None
+        (None, 1) // If no date specified, default to single day behavior
+    };
+    
+    // Calculate the date range if start date is provided
+    let date_range = if let Some(start_date) = start_date {
+        calculate_working_dates(start_date, target_days as i64)
+    } else {
+        Vec::new()
     };
     
     if verbose {
-        if let Some(ref d) = normalized_date {
-            println!("Querying board {} for user '{}' with date filter: {}...", board_id, user.name, d);
-            
-            // Print the GraphQL query that would be used to filter by user name
-            println!("\n📋 GraphQL Query for testing in Monday.com sandbox:");
-            let graphql_query = format!(
-                r#"{{
-    boards(ids: ["{}"]) {{
-        groups(ids: ["new_group_mkkbbd2q"]) {{
-            items_page(limit: {}, query_params: {{rules: [{{column_id: "name", compare_value: ["{}"]}}]}}) {{
-                items {{
-                    id
-                    name
-                    column_values {{
-                        id
-                        value
-                        text
-                    }}
-                }}
-            }}
-        }}
-    }}
-}}
-"#,
-                board_id,
-                500, // Increased limit to catch all possible items
-                user.name
-            );
-            println!("{}", graphql_query);
-            
-            println!("\n💡 To test this query:");
-            println!("1. Go to https://api.monday.com/v2/playground");
-            println!("2. Paste the query above");
-            println!("3. The results will show all items for user '{}'", user.name);
-            println!("4. Look for items where column_values.id = 'date4' contains '{}'", d);
+        if let Some(start_date_val) = start_date {
+            if target_days > 1 {
+                let end_date = date_range.last().map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default();
+                println!("Querying board {} for user '{}' with date range: {} to {} ({} working days)...", 
+                    board_id, user.name, 
+                    start_date_val.format("%Y-%m-%d"),
+                    end_date,
+                    target_days);
+            } else {
+                println!("Querying board {} for user '{}' with date filter: {}...", 
+                    board_id, user.name, start_date_val.format("%Y-%m-%d"));
+            }
         } else {
             println!("Querying board {} for user '{}'...", board_id, user.name);
         }
@@ -535,11 +526,15 @@ async fn query_board(
         println!("\n=== Raw items found for user: {} ===", items.len());
     }
     
-    // Filter items by date if date filter is provided
-    let filtered_items: Vec<&Item> = if let Some(ref filter_date) = normalized_date {
-        items.iter()
-            .filter(|item| is_item_matching_date(item, filter_date))
-            .collect()
+    // Filter items by date range if date filter is provided
+    let filtered_items: Vec<&Item> = if start_date.is_some() {
+        if !date_range.is_empty() {
+            items.iter()
+                .filter(|item| is_item_matching_date_range(item, &date_range))
+                .collect()
+        } else {
+            items.iter().collect()
+        }
     } else {
         items.iter().collect()
     };
@@ -552,83 +547,227 @@ async fn query_board(
         println!("\n=== Filtered items matching date criteria: {} ===", filtered_items_len);
     }
     
-    // Display the results in a clean table format
+    // Display the results in a simplified table format for multi-day queries
     if !limited_items.is_empty() {
-        println!("\n=== FILTERED ITEMS for User {} ===", user.name);
-        
-        // Show date filter info if applicable
-        if let Some(ref filter_date) = normalized_date {
-            println!("Date filter: {}", filter_date);
+        if let Some(start_date_val) = start_date {
+            if target_days > 1 {
+                // Multi-day query - show simplified table
+                display_simplified_table(&limited_items, &date_range, &user.name);
+            } else {
+                // Single day query - show detailed format
+                display_detailed_items(&limited_items, start_date, &user.name, filtered_items_len, limit);
+            }
+        } else {
+            // No date filter - show detailed format
+            display_detailed_items(&limited_items, None, &user.name, filtered_items_len, limit);
         }
-        
-        println!("Found {} items for user {}:", filtered_items_len, user.name);
-        
-        for (index, item) in limited_items.iter().enumerate() {
-            let item_name = item.name.as_deref().unwrap_or("Unnamed");
-            let item_id = item.id.as_deref().unwrap_or("Unknown");
-            println!("\n{}. {} (ID: {})", index + 1, item_name, item_id);
-            
-            // Display column values with titles in a formatted way
-            if !item.column_values.is_empty() {
-                println!("   Columns:");
-                // Find the maximum column title length for formatting
-                let max_title_len = item.column_values.iter()
-                    .map(|col| {
-                        let col_id = col.id.as_deref().unwrap_or("");
-                        map_column_title(col_id).len()
-                    })
-                    .max()
-                    .unwrap_or(0);
+    } else {
+        println!("\nNo items found for user '{}'", user.name);
+        if let Some(start_date_val) = start_date {
+            if target_days > 1 {
+                let end_date = date_range.last().map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default();
+                println!("Date range: {} to {} ({} working days)", 
+                    start_date_val.format("%Y-%m-%d"),
+                    end_date,
+                    target_days);
+            } else {
+                println!("Date filter: {}", start_date_val.format("%Y-%m-%d"));
+            }
+        }
+        println!("This means either:");
+        println!("1. No items exist for this user for the specified date(s)");
+        println!("2. The user name in Monday.com differs from '{}'", user.name);
+    }
+    
+    if let Some(start_date_val) = start_date {
+        if target_days > 1 {
+            let end_date = date_range.last().map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default();
+            println!("\n✅ Found {} total items matching date range: {} to {}", 
+                filtered_items_len, 
+                start_date_val.format("%Y-%m-%d"),
+                end_date);
+        } else {
+            println!("\n✅ Found {} total items matching date filter: {}", 
+                filtered_items_len, start_date_val.format("%Y-%m-%d"));
+        }
+    }
+    
+    Ok(())
+}
+
+// Helper function to display simplified table for multi-day queries
+fn display_simplified_table(items: &[&Item], date_range: &[NaiveDate], user_name: &str) {
+    println!("\n=== CLAIMS SUMMARY for User {} ===", user_name);
+    
+    let start_date = date_range.first().map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default();
+    let end_date = date_range.last().map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default();
+    
+    println!("Date Range: {} to {}", start_date, end_date);
+    
+    // Create a table header
+    println!("\n{:<12} {:<20} {:<15} {:<6}", "Date", "Customer", "Work Item", "Hours");
+    println!("{}", "-".repeat(60));
+    
+    // Group items by date for better organization
+    let mut items_by_date: std::collections::BTreeMap<String, Vec<&Item>> = std::collections::BTreeMap::new();
+    
+    for item in items {
+        if let Some(item_date) = extract_item_date(item) {
+            items_by_date.entry(item_date).or_insert_with(Vec::new).push(item);
+        }
+    }
+    
+    // Display items in date order
+    for date in date_range {
+        let date_str = date.format("%Y-%m-%d").to_string();
+        if let Some(date_items) = items_by_date.get(&date_str) {
+            for item in date_items {
+                let customer = extract_column_value(item, "text__1");
+                let work_item = extract_column_value(item, "text8__1");
+                let hours = extract_column_value(item, "numbers__1");
                 
-                for col in &item.column_values {
-                    if let Some(col_id) = &col.id {
-                        let column_title = map_column_title(col_id);
-                        
-                        if let Some(value) = &col.value {
-                            if value != "null" && !value.is_empty() {
-                                // Format with aligned columns
-                                println!("     {:<width$} : {}", column_title, value, width = max_title_len);
-                            }
-                        } else if let Some(text) = &col.text {
-                            if !text.is_empty() && text != "null" {
-                                // Format with aligned columns
-                                println!("     {:<width$} : {}", column_title, text, width = max_title_len);
+                println!("{:<12} {:<20} {:<15} {:<6}", 
+                    date_str, 
+                    truncate_string(&customer, 18),
+                    truncate_string(&work_item, 13),
+                    hours);
+            }
+        } else {
+            // Show empty row for dates with no entries
+            println!("{:<12} {:<20} {:<15} {:<6}", date_str, "-", "-", "-");
+        }
+    }
+    
+    // Show summary
+    let total_hours: f64 = items.iter()
+        .filter_map(|item| extract_column_value(item, "numbers__1").parse::<f64>().ok())
+        .sum();
+    
+    println!("{}", "-".repeat(60));
+    println!("{:<12} {:<20} {:<15} {:<6.1}", 
+        "TOTAL", "", "", total_hours);
+    println!("\nFound {} items across {} days", items.len(), date_range.len());
+}
+
+// Helper function to display detailed items (original format)
+fn display_detailed_items(items: &[&Item], filter_date: Option<NaiveDate>, user_name: &str, filtered_items_len: usize, limit: usize) {
+    println!("\n=== FILTERED ITEMS for User {} ===", user_name);
+    
+    if let Some(date) = filter_date {
+        println!("Date filter: {}", date.format("%Y-%m-%d"));
+    }
+    
+    println!("Found {} items for user {}:", filtered_items_len, user_name);
+    
+    for (index, item) in items.iter().enumerate() {
+        let item_name = item.name.as_deref().unwrap_or("Unnamed");
+        let item_id = item.id.as_deref().unwrap_or("Unknown");
+        println!("\n{}. {} (ID: {})", index + 1, item_name, item_id);
+        
+        if !item.column_values.is_empty() {
+            println!("   Columns:");
+            let max_title_len = item.column_values.iter()
+                .map(|col| {
+                    let col_id = col.id.as_deref().unwrap_or("");
+                    map_column_title(col_id).len()
+                })
+                .max()
+                .unwrap_or(0);
+            
+            for col in &item.column_values {
+                if let Some(col_id) = &col.id {
+                    let column_title = map_column_title(col_id);
+                    
+                    if let Some(value) = &col.value {
+                        if value != "null" && !value.is_empty() {
+                            println!("     {:<width$} : {}", column_title, value, width = max_title_len);
+                        }
+                    } else if let Some(text) = &col.text {
+                        if !text.is_empty() && text != "null" {
+                            println!("     {:<width$} : {}", column_title, text, width = max_title_len);
+                        }
+                    }
+                }
+            }
+        } else {
+            println!("   No column values available");
+        }
+    }
+    
+    if filtered_items_len > limit {
+        println!("\n... and {} more items (showing first {} items)", 
+               filtered_items_len - limit, limit);
+    }
+}
+
+// Helper function to check if an item matches any date in the range
+fn is_item_matching_date_range(item: &Item, date_range: &[NaiveDate]) -> bool {
+    for date in date_range {
+        let date_str = date.format("%Y-%m-%d").to_string();
+        if is_item_matching_date(item, &date_str) {
+            return true;
+        }
+    }
+    false
+}
+
+// Helper function to extract date from an item
+fn extract_item_date(item: &Item) -> Option<String> {
+    for col in &item.column_values {
+        if let Some(col_id) = &col.id {
+            if col_id == "date4" {
+                if let Some(value) = &col.value {
+                    if let Ok(parsed_value) = serde_json::from_str::<serde_json::Value>(value) {
+                        if let Some(date_obj) = parsed_value.get("date") {
+                            if let Some(date_str) = date_obj.as_str() {
+                                return Some(date_str.to_string());
                             }
                         }
                     }
                 }
-            } else {
-                println!("   No column values available");
+                if let Some(text) = &col.text {
+                    return Some(text.to_string());
+                }
             }
         }
-        
-        // Show limit message if there are more items than the limit
-        if filtered_items_len > limit {
-            println!("\n... and {} more items (showing first {} items)", 
-                   filtered_items_len - limit, limit);
+    }
+    None
+}
+
+// Helper function to extract specific column value
+fn extract_column_value(item: &Item, column_id: &str) -> String {
+    for col in &item.column_values {
+        if let Some(col_id) = &col.id {
+            if col_id == column_id {
+                if let Some(value) = &col.value {
+                    if value != "null" && !value.is_empty() {
+                        // Try to parse JSON value for complex columns
+                        if let Ok(parsed_value) = serde_json::from_str::<serde_json::Value>(value) {
+                            if let Some(text) = parsed_value.as_str() {
+                                return text.to_string();
+                            }
+                        }
+                        return value.to_string();
+                    }
+                }
+                if let Some(text) = &col.text {
+                    if !text.is_empty() && text != "null" {
+                        return text.to_string();
+                    }
+                }
+            }
         }
-        
+    }
+    "".to_string()
+}
+
+// Helper function to truncate strings for table display
+fn truncate_string(s: &str, max_length: usize) -> String {
+    if s.len() <= max_length {
+        s.to_string()
     } else {
-        println!("\nNo items found for user '{}'", user.name);
-        if let Some(ref filter_date) = normalized_date {
-            println!("Date filter: {}", filter_date);
-        }
-        println!("This means either:");
-        println!("1. No items exist for this user");
-        println!("2. Items exist but don't match the date filter");
-        println!("3. The user name in Monday.com differs from '{}'", user.name);
-        
-        // If no items found with date filter, show how many total items exist for the user
-        if let Some(ref filter_date) = normalized_date {
-            println!("4. Total items found for user (without date filter): {}", items.len());
-        }
+        format!("{}...", &s[..max_length.saturating_sub(3)])
     }
-    
-    if let Some(ref filter_date) = normalized_date {
-        println!("\n✅ Found {} total items matching date filter: {}", filtered_items_len, filter_date);
-    }
-    
-    Ok(())
 }
 
 // Helper function to map activity type value back to name
@@ -1085,6 +1224,22 @@ mod tests {
             _ => panic!("Expected Query command"),
         }
     }
+
+    #[test]
+    fn test_cli_parsing_query_with_days() {
+        let result = Cli::try_parse_from(&["claim", "query", "-D", "2025-09-15", "-d", "5"]);
+        assert!(result.is_ok());
+        
+        let cli = result.unwrap();
+        match cli.command {
+            Some(Commands::Query { date, days, .. }) => {
+                assert_eq!(date, Some("2025-09-15".to_string()));
+                assert_eq!(days, 5);
+            }
+            _ => panic!("Expected Query command"),
+        }
+    }
+
 
     #[test]
     fn test_cli_parsing_add() {
