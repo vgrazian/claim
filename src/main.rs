@@ -604,9 +604,9 @@ fn display_simplified_table(items: &[&Item], date_range: &[NaiveDate], user_name
     
     println!("Date Range: {} to {}", start_date, end_date);
     
-    // Create a table header
-    println!("\n{:<12} {:<20} {:<15} {:<6}", "Date", "Customer", "Work Item", "Hours");
-    println!("{}", "-".repeat(60));
+    // Create a table header with Status column
+    println!("\n{:<12} {:<12} {:<20} {:<15} {:<6}", "Date", "Status", "Customer", "Work Item", "Hours");
+    println!("{}", "-".repeat(70));
     
     // Group items by date for better organization
     let mut items_by_date: std::collections::BTreeMap<String, Vec<&Item>> = std::collections::BTreeMap::new();
@@ -622,19 +622,21 @@ fn display_simplified_table(items: &[&Item], date_range: &[NaiveDate], user_name
         let date_str = date.format("%Y-%m-%d").to_string();
         if let Some(date_items) = items_by_date.get(&date_str) {
             for item in date_items {
+                let status = extract_status_value(item);
                 let customer = extract_column_value(item, "text__1");
                 let work_item = extract_column_value(item, "text8__1");
                 let hours = extract_column_value(item, "numbers__1");
                 
-                println!("{:<12} {:<20} {:<15} {:<6}", 
+                println!("{:<12} {:<12} {:<20} {:<15} {:<6}", 
                     date_str, 
+                    truncate_string(&status, 10),
                     truncate_string(&customer, 18),
                     truncate_string(&work_item, 13),
                     hours);
             }
         } else {
             // Show empty row for dates with no entries
-            println!("{:<12} {:<20} {:<15} {:<6}", date_str, "-", "-", "-");
+            println!("{:<12} {:<12} {:<20} {:<15} {:<6}", date_str, "-", "-", "-", "-");
         }
     }
     
@@ -643,10 +645,37 @@ fn display_simplified_table(items: &[&Item], date_range: &[NaiveDate], user_name
         .filter_map(|item| extract_column_value(item, "numbers__1").parse::<f64>().ok())
         .sum();
     
-    println!("{}", "-".repeat(60));
-    println!("{:<12} {:<20} {:<15} {:<6.1}", 
-        "TOTAL", "", "", total_hours);
+    println!("{}", "-".repeat(70));
+    println!("{:<12} {:<12} {:<20} {:<15} {:<6.1}", 
+        "TOTAL", "", "", "", total_hours);
     println!("\nFound {} items across {} days", items.len(), date_range.len());
+}
+
+// Helper function to extract status value and map it to activity type name
+fn extract_status_value(item: &Item) -> String {
+    for col in &item.column_values {
+        if let Some(col_id) = &col.id {
+            if col_id == "status" {
+                // Try to parse the status value from JSON
+                if let Some(value) = &col.value {
+                    if let Ok(parsed_value) = serde_json::from_str::<serde_json::Value>(value) {
+                        if let Some(status_index) = parsed_value.get("index") {
+                            if let Some(index_num) = status_index.as_u64() {
+                                return map_activity_value_to_name(index_num as u8);
+                            }
+                        }
+                    }
+                }
+                // Fallback: try to parse directly from text
+                if let Some(text) = &col.text {
+                    if !text.is_empty() && text != "null" {
+                        return text.to_string();
+                    }
+                }
+            }
+        }
+    }
+    "unknown".to_string()
 }
 
 // Helper function to display detailed items (original format)
