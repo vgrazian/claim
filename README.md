@@ -83,40 +83,48 @@ No command specified. Use --help for available commands.
 Query claims from Monday.com board.
 
 ```bash
-claim query [--date DATE] [--limit LIMIT] [-v]
+claim query [--date DATE] [--days DAYS] [--limit LIMIT] [-v]
 ```
 
 **Options:**
 - `-D, --date DATE`: Date to filter claims (YYYY-MM-DD, YYYY.MM.DD, or YYYY/MM/DD format)
+- `-d, --days DAYS`: Number of working days to query (default: 1, skips weekends)
 - `--limit LIMIT`: Number of rows to display (default: 5)
 - `-v, --verbose`: Verbose output
 
-**Example:**
+**Examples:**
 ```bash
-cargo run -- query -D 2025-09-15
-# or if built:
-./target/release/claim query -D 2025-09-15
+# Query a single day
+claim query -D 2025-09-15
+
+# Query a full work week (5 days starting from specified date)
+claim query -D 2025-09-15 -d 5
+
+# Query 10 days with increased limit and verbose output
+claim query -D 2025-09-01 -d 10 --limit 20 -v
 ```
 
-**Output:**
+**Output for multi-day query:**
 ```text
-Running for user id ****, user name *** ****, email *** for year ###
+Running for user id *****, user name ***** *****, email ******** for year ####
 
-=== FILTERED ITEMS for User **** **** ===
-Date filter: 2025-09-15
-Found 1 items for user **** *****:
+=== CLAIMS SUMMARY for User ***** ***** ===
+Date Range: 2025-04-07 to 2025-04-11
 
-1. ***** **** (ID: #########)
-   Columns:
-     Subitems           : {}
-     Person             : {"personsAndTeams":[{"id":*****,"kind":"person"}]}
-     Status             : {"index":1,"post_id":null,"changed_at":"2025-09-19T13:58:54.400Z"}
-     Date               : {"date":"2025-09-15"}
-     Text               : "*****customer name*****"
-     Text 8             : "*****work item*****"
-     Numbers            : "4"
+Date         Status       Customer             Work Item       Hours
+----------------------------------------------------------------------
+2025-04-07   presales     CUSTOMER_A           PROJ-123        8
+2025-04-08   presales     CUSTOMER_A           PROJ-123        8
+2025-04-09   presales     CUSTOMER_A           PROJ-123        8
+2025-04-10   billable     CUSTOMER_B           TASK-456        4
+2025-04-10   presales     CUSTOMER_C           WI-789          4
+2025-04-11   presales     CUSTOMER_C           WI-789          8
+----------------------------------------------------------------------
+TOTAL                                                          40.0
 
-✅ Found 1 total items matching date filter: 2025-09-15
+Found 6 items across 5 days
+
+✅ Found 6 total items matching date range: 2025-04-07 to 2025-04-11
 ```
 
 ### add
@@ -154,9 +162,9 @@ Running for user id ***, user name *** ***, email *** for year ####
 Enter claim details (press Enter to skip optional fields):
 Date (YYYY-MM-DD, YYYY.MM.DD, or YYYY/MM/DD, optional - default: today):
 Activity type (optional, default: billable):
-Customer name (optional): CUST-NAME
-Work item (optional): WI.12344
-Number of hours (optional): 1
+Customer name (optional): CUSTOMER_NAME
+Work item (optional): WI-12344
+Number of hours (optional): 8
 Number of working days (optional, default: 1, skips weekends):
 
 === Adding Claim for User ===
@@ -166,9 +174,9 @@ Year: ####
 === Claim Details ===
 Date: 2025-09-23
 Activity Type: billable (value: 1)
-Customer: CUST-NAME
-Work Item: WI.12344
-Hours: 1
+Customer: CUSTOMER_NAME
+Work Item: WI-12344
+Hours: 8
 Days requested: 1
 Actual working days: 1
 
@@ -188,34 +196,59 @@ Creating item for 2025-09-23 (1 of 1)...
 🎉 Successfully created 1 out of 1 items
 
 💡 Equivalent command line:
-   claim add -D 2025-09-23 -c "CUST-NAME" -w "WI.12344" -H 1
+   claim add -D 2025-09-23 -c "CUSTOMER_NAME" -w "WI-12344" -H 8
 ```
 
 ## EXAMPLES
 
-### Query claims for a specific date:
+### Query Examples
+
+**Query claims for a specific date:**
 ```bash
 claim query -D 2025-09-15
 ```
 
-### Add a single claim entry:
+**Query multiple days with weekend skipping:**
 ```bash
-claim add -D 2025-09-23 -c "Customer Name" -w "WI.12344" -H 8
+claim query -D 2025-09-15 -d 7  # Will show 5 business days (skips weekends)
 ```
 
-### Add multiple days of claims:
+**Query with custom limit and verbose output:**
 ```bash
-claim add -D 2025-09-23 -c "Customer" -w "PROJ-123" -H 8 -d 5
+claim query -D 2025-09-01 -d 10 --limit 15 -v
 ```
 
-### Add claim non-interactively:
+**Query current week:**
 ```bash
-claim add -D 2025-09-23 -c "Customer" -w "ITEM-456" -H 6 -y
+# Assuming today is Monday, query the current work week
+claim query -d 5
 ```
 
-### Verbose query with increased limit:
+### Add Examples
+
+**Add a single claim entry:**
 ```bash
-claim query -D 2025-09-15 --limit 20 -v
+claim add -D 2025-09-23 -c "CUSTOMER_A" -w "PROJ-123" -H 8
+```
+
+**Add multiple days of claims:**
+```bash
+claim add -D 2025-09-23 -c "CUSTOMER_B" -w "TASK-456" -H 6 -d 5
+```
+
+**Add claim with specific activity type:**
+```bash
+claim add -D 2025-09-23 -t vacation -d 3
+```
+
+**Add claim non-interactively:**
+```bash
+claim add -D 2025-09-23 -c "CUSTOMER_C" -w "WI-789" -H 4 -y
+```
+
+**Add claim for today with verbose output:**
+```bash
+claim add -c "CUSTOMER_D" -w "PROJ-999" -H 7 -v
 ```
 
 ## CONFIGURATION FILE LOCATION
@@ -321,3 +354,31 @@ This application connects to Monday.com using your API key to retrieve user info
 - Numbers column (hours)
 
 The application automatically handles weekend skipping when adding multiple days and provides comprehensive error handling for API interactions.
+
+### Multi-Day Query Features
+
+The query command with the `-d` option provides:
+- **Automatic weekend skipping** - Only business days are included in the range
+- **Simplified table view** - Clean summary format for multiple days
+- **Multiple entries per day support** - Handles cases where users have multiple claims on the same date
+- **Total hours calculation** - Automatic sum of hours across the period
+- **Empty day indication** - Shows dates with no entries for complete timeline
+
+### Activity Type Mapping
+
+The application maps between human-readable activity types and their corresponding numeric values:
+
+| Activity Type    | Value |
+|------------------|-------|
+| vacation         | 0     |
+| billable         | 1     |
+| holding          | 2     |
+| education        | 3     |
+| work_reduction   | 4     |
+| tbd              | 5     |
+| holiday          | 6     |
+| presales         | 7     |
+| illness          | 8     |
+| boh1             | 9     |
+| boh2             | 10    |
+| boh3             | 11    |
