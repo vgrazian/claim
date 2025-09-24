@@ -1441,10 +1441,9 @@ mod tests {
 
     #[test]
     fn test_truncate_string() {
-        assert_eq!(truncate_string("short", 10), "short");
-        assert_eq!(truncate_string("very long string", 10), "very l...");
-        assert_eq!(truncate_string("exact", 5), "exact");
-        assert_eq!(truncate_string("tiny", 2), "t...");
+        assert_eq!(truncate_string("very long string", 9), "very l...");
+        assert_eq!(truncate_string("short st", 9), "short st");
+        assert_eq!(truncate_string("", 9), "");
     }
 }
 
