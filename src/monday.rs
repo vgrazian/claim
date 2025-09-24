@@ -521,6 +521,7 @@ impl MondayClient {
         }
     }
 
+    // In monday.rs, update the query_items_by_user_name method to handle pagination:
     pub async fn query_items_by_user_name(
         &self,
         board_id: &str,
@@ -529,53 +530,100 @@ impl MondayClient {
         limit: usize,
         verbose: bool,
     ) -> Result<Vec<Item>> {
-        let query = format!(
-            r#"
-        {{
-            boards(ids: ["{}"]) {{
-                groups(ids: ["{}"]) {{
-                    items_page(limit: {}, query_params: {{rules: [{{column_id: "name", compare_value: ["{}"]}}]}}) {{
-                        items {{
-                            id
-                            name
-                            column_values {{
+        let mut all_items = Vec::new();
+        let mut cursor: Option<String> = None;
+        let page_size = 100; // Monday.com API max page size
+        
+        loop {
+            let cursor_clause = if let Some(cursor_str) = &cursor {
+                format!(", cursor: \"{}\"", cursor_str)
+            } else {
+                String::new()
+            };
+            
+            let query = format!(
+                r#"
+            {{
+                boards(ids: ["{}"]) {{
+                    groups(ids: ["{}"]) {{
+                        items_page(limit: {}, query_params: {{rules: [{{column_id: "name", compare_value: ["{}"]}}]}}{}) {{
+                            cursor
+                            items {{
                                 id
-                                value
-                                text
+                                name
+                                column_values {{
+                                    id
+                                    value
+                                    text
+                                }}
                             }}
                         }}
                     }}
                 }}
             }}
-        }}
-        "#,
-            board_id, group_id, limit, user_name
-        );
+            "#,
+                board_id, group_id, page_size.min(limit - all_items.len()), user_name, cursor_clause
+            );
 
-        if verbose {
-            println!("Sending user name query:\n{}", query);
+            if verbose {
+                println!("Sending paginated user name query (cursor: {:?})", cursor);
+            }
+
+            let request_body = MondayRequest { query };
+            let response = self.send_request(request_body, verbose).await?;
+
+            if verbose {
+                println!("Paginated query response: {}", &response[..500.min(response.len())]);
+            }
+
+            // Parse the response manually to handle the nested structure correctly
+            let value: Value = serde_json::from_str(&response)
+                .map_err(|e| anyhow!("Failed to parse JSON response: {}", e))?;
+
+            // Extract items from the nested JSON structure
+            let mut page_items = extract_items_from_response(&value)
+                .map_err(|e| anyhow!("Failed to extract items from response: {}", e))?;
+
+            if verbose {
+                println!("Successfully extracted {} items from page", page_items.len());
+            }
+
+            all_items.append(&mut page_items);
+
+            // Check if we have more pages or reached the limit
+            if let Some(data) = value.get("data") {
+                if let Some(boards) = data.get("boards").and_then(|b| b.as_array()) {
+                    for board in boards {
+                        if let Some(groups) = board.get("groups").and_then(|g| g.as_array()) {
+                            for group in groups {
+                                if let Some(items_page) = group.get("items_page") {
+                                    // Check if there's a next page
+                                    if let Some(next_cursor) = items_page.get("cursor").and_then(|c| c.as_str()) {
+                                        if !next_cursor.is_empty() && all_items.len() < limit {
+                                            cursor = Some(next_cursor.to_string());
+                                            continue;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            break;
         }
 
-        let request_body = MondayRequest { query };
-        let response = self.send_request(request_body, verbose).await?;
-
         if verbose {
-            println!("User name query response: {}", &response[..500.min(response.len())]);
+            println!("Total items collected: {}", all_items.len());
         }
 
-        // Parse the response manually to handle the nested structure correctly
-        let value: Value = serde_json::from_str(&response)
-            .map_err(|e| anyhow!("Failed to parse JSON response: {}", e))?;
-
-        // Extract items from the nested JSON structure
-        let items = extract_items_from_response(&value)
-            .map_err(|e| anyhow!("Failed to extract items from response: {}", e))?;
-
-        if verbose {
-            println!("Successfully extracted {} items", items.len());
+        // Limit the final result
+        if all_items.len() > limit {
+            all_items.truncate(limit);
         }
 
-        Ok(items)
+        Ok(all_items)
     }
 
     async fn send_request(&self, request_body: MondayRequest, verbose: bool) -> Result<String> {

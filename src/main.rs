@@ -519,19 +519,37 @@ async fn query_board(
     }
     
     // Use a special method to query by user name instead of user ID
-    // Increased limit to 500 to catch all possible items
-    let items = client.query_items_by_user_name(board_id, "new_group_mkkbbd2q", &user.name, 500, verbose).await?;
+    // Increased limit to catch all possible items
+    let items = client.query_items_by_user_name(board_id, "new_group_mkkbbd2q", &user.name, 1000, verbose).await?;
     
     if verbose {
         println!("\n=== Raw items found for user: {} ===", items.len());
+        // Debug: show all dates found
+        for (i, item) in items.iter().enumerate() {
+            if let Some(item_date) = extract_item_date(item) {
+                println!("Item {}: {}", i + 1, item_date);
+            } else {
+                println!("Item {}: [No date found]", i + 1);
+            }
+        }
     }
     
     // Filter items by date range if date filter is provided
     let filtered_items: Vec<&Item> = if start_date.is_some() {
         if !date_range.is_empty() {
-            items.iter()
+            let filtered: Vec<&Item> = items.iter()
                 .filter(|item| is_item_matching_date_range(item, &date_range))
-                .collect()
+                .collect();
+            
+            if verbose {
+                println!("After date range filtering: {} items", filtered.len());
+                for item in &filtered {
+                    if let Some(item_date) = extract_item_date(item) {
+                        println!("Filtered item date: {}", item_date);
+                    }
+                }
+            }
+            filtered
         } else {
             items.iter().collect()
         }
@@ -548,11 +566,12 @@ async fn query_board(
     }
     
     // Display the results in a simplified table format for multi-day queries
-    if !limited_items.is_empty() {
+    if !filtered_items.is_empty() {
         if let Some(start_date_val) = start_date {
             if target_days > 1 {
                 // Multi-day query - show simplified table
-                display_simplified_table(&limited_items, &date_range, &user.name);
+                // Use filtered_items to see all matching items
+                display_simplified_table(&filtered_items, &date_range, &user.name, verbose);
             } else {
                 // Single day query - show detailed format
                 display_detailed_items(&limited_items, start_date, &user.name, filtered_items_len, limit);
@@ -593,210 +612,6 @@ async fn query_board(
     }
     
     Ok(())
-}
-
-// Helper function to display simplified table for multi-day queries
-fn display_simplified_table(items: &[&Item], date_range: &[NaiveDate], user_name: &str) {
-    println!("\n=== CLAIMS SUMMARY for User {} ===", user_name);
-    
-    let start_date = date_range.first().map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default();
-    let end_date = date_range.last().map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default();
-    
-    println!("Date Range: {} to {}", start_date, end_date);
-    
-    // Create a table header with Status column
-    println!("\n{:<12} {:<12} {:<20} {:<15} {:<6}", "Date", "Status", "Customer", "Work Item", "Hours");
-    println!("{}", "-".repeat(70));
-    
-    // Group items by date for better organization
-    let mut items_by_date: std::collections::BTreeMap<String, Vec<&Item>> = std::collections::BTreeMap::new();
-    
-    for item in items {
-        if let Some(item_date) = extract_item_date(item) {
-            items_by_date.entry(item_date).or_insert_with(Vec::new).push(item);
-        }
-    }
-    
-    // Display items in date order
-    for date in date_range {
-        let date_str = date.format("%Y-%m-%d").to_string();
-        if let Some(date_items) = items_by_date.get(&date_str) {
-            for item in date_items {
-                let status = extract_status_value(item);
-                let customer = extract_column_value(item, "text__1");
-                let work_item = extract_column_value(item, "text8__1");
-                let hours = extract_column_value(item, "numbers__1");
-                
-                println!("{:<12} {:<12} {:<20} {:<15} {:<6}", 
-                    date_str, 
-                    truncate_string(&status, 10),
-                    truncate_string(&customer, 18),
-                    truncate_string(&work_item, 13),
-                    hours);
-            }
-        } else {
-            // Show empty row for dates with no entries
-            println!("{:<12} {:<12} {:<20} {:<15} {:<6}", date_str, "-", "-", "-", "-");
-        }
-    }
-    
-    // Show summary
-    let total_hours: f64 = items.iter()
-        .filter_map(|item| extract_column_value(item, "numbers__1").parse::<f64>().ok())
-        .sum();
-    
-    println!("{}", "-".repeat(70));
-    println!("{:<12} {:<12} {:<20} {:<15} {:<6.1}", 
-        "TOTAL", "", "", "", total_hours);
-    println!("\nFound {} items across {} days", items.len(), date_range.len());
-}
-
-// Helper function to extract status value and map it to activity type name
-fn extract_status_value(item: &Item) -> String {
-    for col in &item.column_values {
-        if let Some(col_id) = &col.id {
-            if col_id == "status" {
-                // Try to parse the status value from JSON
-                if let Some(value) = &col.value {
-                    if let Ok(parsed_value) = serde_json::from_str::<serde_json::Value>(value) {
-                        if let Some(status_index) = parsed_value.get("index") {
-                            if let Some(index_num) = status_index.as_u64() {
-                                return map_activity_value_to_name(index_num as u8);
-                            }
-                        }
-                    }
-                }
-                // Fallback: try to parse directly from text
-                if let Some(text) = &col.text {
-                    if !text.is_empty() && text != "null" {
-                        return text.to_string();
-                    }
-                }
-            }
-        }
-    }
-    "unknown".to_string()
-}
-
-// Helper function to display detailed items (original format)
-fn display_detailed_items(items: &[&Item], filter_date: Option<NaiveDate>, user_name: &str, filtered_items_len: usize, limit: usize) {
-    println!("\n=== FILTERED ITEMS for User {} ===", user_name);
-    
-    if let Some(date) = filter_date {
-        println!("Date filter: {}", date.format("%Y-%m-%d"));
-    }
-    
-    println!("Found {} items for user {}:", filtered_items_len, user_name);
-    
-    for (index, item) in items.iter().enumerate() {
-        let item_name = item.name.as_deref().unwrap_or("Unnamed");
-        let item_id = item.id.as_deref().unwrap_or("Unknown");
-        println!("\n{}. {} (ID: {})", index + 1, item_name, item_id);
-        
-        if !item.column_values.is_empty() {
-            println!("   Columns:");
-            let max_title_len = item.column_values.iter()
-                .map(|col| {
-                    let col_id = col.id.as_deref().unwrap_or("");
-                    map_column_title(col_id).len()
-                })
-                .max()
-                .unwrap_or(0);
-            
-            for col in &item.column_values {
-                if let Some(col_id) = &col.id {
-                    let column_title = map_column_title(col_id);
-                    
-                    if let Some(value) = &col.value {
-                        if value != "null" && !value.is_empty() {
-                            println!("     {:<width$} : {}", column_title, value, width = max_title_len);
-                        }
-                    } else if let Some(text) = &col.text {
-                        if !text.is_empty() && text != "null" {
-                            println!("     {:<width$} : {}", column_title, text, width = max_title_len);
-                        }
-                    }
-                }
-            }
-        } else {
-            println!("   No column values available");
-        }
-    }
-    
-    if filtered_items_len > limit {
-        println!("\n... and {} more items (showing first {} items)", 
-               filtered_items_len - limit, limit);
-    }
-}
-
-// Helper function to check if an item matches any date in the range
-fn is_item_matching_date_range(item: &Item, date_range: &[NaiveDate]) -> bool {
-    for date in date_range {
-        let date_str = date.format("%Y-%m-%d").to_string();
-        if is_item_matching_date(item, &date_str) {
-            return true;
-        }
-    }
-    false
-}
-
-// Helper function to extract date from an item
-fn extract_item_date(item: &Item) -> Option<String> {
-    for col in &item.column_values {
-        if let Some(col_id) = &col.id {
-            if col_id == "date4" {
-                if let Some(value) = &col.value {
-                    if let Ok(parsed_value) = serde_json::from_str::<serde_json::Value>(value) {
-                        if let Some(date_obj) = parsed_value.get("date") {
-                            if let Some(date_str) = date_obj.as_str() {
-                                return Some(date_str.to_string());
-                            }
-                        }
-                    }
-                }
-                if let Some(text) = &col.text {
-                    return Some(text.to_string());
-                }
-            }
-        }
-    }
-    None
-}
-
-// Helper function to extract specific column value
-fn extract_column_value(item: &Item, column_id: &str) -> String {
-    for col in &item.column_values {
-        if let Some(col_id) = &col.id {
-            if col_id == column_id {
-                if let Some(value) = &col.value {
-                    if value != "null" && !value.is_empty() {
-                        // Try to parse JSON value for complex columns
-                        if let Ok(parsed_value) = serde_json::from_str::<serde_json::Value>(value) {
-                            if let Some(text) = parsed_value.as_str() {
-                                return text.to_string();
-                            }
-                        }
-                        return value.to_string();
-                    }
-                }
-                if let Some(text) = &col.text {
-                    if !text.is_empty() && text != "null" {
-                        return text.to_string();
-                    }
-                }
-            }
-        }
-    }
-    "".to_string()
-}
-
-// Helper function to truncate strings for table display
-fn truncate_string(s: &str, max_length: usize) -> String {
-    if s.len() <= max_length {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_length.saturating_sub(3)])
-    }
 }
 
 // Helper function to map activity type value back to name
@@ -843,6 +658,17 @@ fn is_item_matching_date(item: &Item, target_date: &str) -> bool {
                     }
                 }
             }
+        }
+    }
+    false
+}
+
+// Helper function to check if an item matches any date in the range
+fn is_item_matching_date_range(item: &Item, date_range: &[NaiveDate]) -> bool {
+    for date in date_range {
+        let date_str = date.format("%Y-%m-%d").to_string();
+        if is_item_matching_date(item, &date_str) {
+            return true;
         }
     }
     false
@@ -1088,6 +914,275 @@ fn mask_api_key(api_key: &str) -> String {
     }
 }
 
+// Helper function to extract date from an item
+fn extract_item_date(item: &Item) -> Option<String> {
+    for col in &item.column_values {
+        if let Some(col_id) = &col.id {
+            if col_id == "date4" {
+                // Try to parse from value field (JSON format)
+                if let Some(value) = &col.value {
+                    if value != "null" && !value.is_empty() {
+                        if let Ok(parsed_value) = serde_json::from_str::<serde_json::Value>(value) {
+                            if let Some(date_obj) = parsed_value.get("date") {
+                                if let Some(date_str) = date_obj.as_str() {
+                                    // Normalize the date format to YYYY-MM-DD
+                                    if let Ok(naive_date) = chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
+                                        return Some(naive_date.format("%Y-%m-%d").to_string());
+                                    }
+                                    // Try other common date formats
+                                    if let Ok(naive_date) = chrono::NaiveDate::parse_from_str(date_str, "%Y/%m/%d") {
+                                        return Some(naive_date.format("%Y-%m-%d").to_string());
+                                    }
+                                    if let Ok(naive_date) = chrono::NaiveDate::parse_from_str(date_str, "%Y.%m.%d") {
+                                        return Some(naive_date.format("%Y-%m-%d").to_string());
+                                    }
+                                    // Return the original string if parsing fails
+                                    return Some(date_str.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+                // Fallback: try to parse from text field
+                if let Some(text) = &col.text {
+                    if !text.is_empty() && text != "null" {
+                        // Normalize the date format
+                        if let Ok(naive_date) = chrono::NaiveDate::parse_from_str(text, "%Y-%m-%d") {
+                            return Some(naive_date.format("%Y-%m-%d").to_string());
+                        }
+                        if let Ok(naive_date) = chrono::NaiveDate::parse_from_str(text, "%Y/%m/%d") {
+                            return Some(naive_date.format("%Y-%m-%d").to_string());
+                        }
+                        if let Ok(naive_date) = chrono::NaiveDate::parse_from_str(text, "%Y.%m.%d") {
+                            return Some(naive_date.format("%Y-%m-%d").to_string());
+                        }
+                        return Some(text.to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+// Helper function to extract specific column value
+fn extract_column_value(item: &Item, column_id: &str) -> String {
+    for col in &item.column_values {
+        if let Some(col_id) = &col.id {
+            if col_id == column_id {
+                if let Some(value) = &col.value {
+                    if value != "null" && !value.is_empty() {
+                        // Try to parse JSON value for complex columns
+                        if let Ok(parsed_value) = serde_json::from_str::<serde_json::Value>(value) {
+                            if let Some(text) = parsed_value.as_str() {
+                                return text.to_string();
+                            }
+                        }
+                        return value.to_string();
+                    }
+                }
+                if let Some(text) = &col.text {
+                    if !text.is_empty() && text != "null" {
+                        return text.to_string();
+                    }
+                }
+            }
+        }
+    }
+    "".to_string()
+}
+
+// Helper function to extract status value and map it to activity type name
+fn extract_status_value(item: &Item) -> String {
+    for col in &item.column_values {
+        if let Some(col_id) = &col.id {
+            if col_id == "status" {
+                // Try to parse the status value from JSON
+                if let Some(value) = &col.value {
+                    if let Ok(parsed_value) = serde_json::from_str::<serde_json::Value>(value) {
+                        if let Some(status_index) = parsed_value.get("index") {
+                            if let Some(index_num) = status_index.as_u64() {
+                                return map_activity_value_to_name(index_num as u8);
+                            }
+                        }
+                    }
+                }
+                // Fallback: try to parse directly from text
+                if let Some(text) = &col.text {
+                    if !text.is_empty() && text != "null" {
+                        return text.to_string();
+                    }
+                }
+            }
+        }
+    }
+    "unknown".to_string()
+}
+
+// Helper function to truncate strings for table display
+fn truncate_string(s: &str, max_length: usize) -> String {
+    if s.len() <= max_length {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max_length.saturating_sub(3)])
+    }
+}
+
+// Display simplified table for multi-day queries
+fn display_simplified_table(items: &[&Item], date_range: &[NaiveDate], user_name: &str, verbose: bool) {
+    println!("\n=== CLAIMS SUMMARY for User {} ===", user_name);
+    
+    let start_date = date_range.first().map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default();
+    let end_date = date_range.last().map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default();
+    
+    println!("Date Range: {} to {}", start_date, end_date);
+    
+    if verbose {
+        // Debug: Show what dates we found in the items
+        println!("Debug: Processing {} items with dates:", items.len());
+        for (i, item) in items.iter().enumerate() {
+            if let Some(item_date) = extract_item_date(item) {
+                println!("  Item {}: {}", i + 1, item_date);
+            } else {
+                println!("  Item {}: [No date found]", i + 1);
+            }
+        }
+        
+        // Add detailed debug for date extraction
+        println!("=== DEBUG: Verifying date extraction for all {} items ===", items.len());
+        let mut success_count = 0;
+        for (i, item) in items.iter().enumerate() {
+            if let Some(date) = extract_item_date(item) {
+                success_count += 1;
+                println!("  Item {}: ✓ Extracted date: {}", i + 1, date);
+            } else {
+                println!("  Item {}: ✗ Failed to extract date", i + 1);
+                // Debug the item structure
+                println!("    Item ID: {:?}", item.id);
+                println!("    Item name: {:?}", item.name);
+                println!("    Column count: {}", item.column_values.len());
+                for (j, col) in item.column_values.iter().enumerate() {
+                    println!("    Column {}: ID={:?}, Value={:?}, Text={:?}", 
+                        j + 1, col.id, col.value, col.text);
+                }
+            }
+        }
+        println!("Date extraction success: {}/{}", success_count, items.len());
+    }
+    
+    // Create a table header with Status column
+    println!("\n{:<12} {:<12} {:<20} {:<15} {:<6}", "Date", "Status", "Customer", "Work Item", "Hours");
+    println!("{}", "-".repeat(70));
+    
+    // Group items by date using a HashMap
+    let mut items_by_date: std::collections::HashMap<String, Vec<&Item>> = std::collections::HashMap::new();
+    
+    for item in items {
+        if let Some(item_date) = extract_item_date(item) {
+            // Ensure the date is in YYYY-MM-DD format
+            let normalized_date = match chrono::NaiveDate::parse_from_str(&item_date, "%Y-%m-%d") {
+                Ok(date) => date.format("%Y-%m-%d").to_string(),
+                Err(_) => item_date, // Use as-is if parsing fails
+            };
+            items_by_date.entry(normalized_date).or_insert_with(Vec::new).push(item);
+        }
+    }
+    
+    if verbose {
+        // Debug: Show what dates we have in the map
+        let mut dates: Vec<String> = items_by_date.keys().cloned().collect();
+        dates.sort();
+        println!("Debug: Unique dates in HashMap: {:?}", dates);
+        println!("Debug: Date range to display: {:?}", date_range.iter().map(|d| d.format("%Y-%m-%d").to_string()).collect::<Vec<_>>());
+    }
+    
+    // Display items in date range order
+    let mut total_hours: f64 = 0.0;
+    let mut displayed_items = 0;
+    
+    for date in date_range {
+        let date_str = date.format("%Y-%m-%d").to_string();
+        
+        if let Some(date_items) = items_by_date.get(&date_str) {
+            displayed_items += date_items.len();
+            for item in date_items {
+                let status = extract_status_value(item);
+                let customer = extract_column_value(item, "text__1");
+                let work_item = extract_column_value(item, "text8__1");
+                let hours_str = extract_column_value(item, "numbers__1");
+                let hours = hours_str.parse::<f64>().unwrap_or(0.0);
+                total_hours += hours;
+                
+                println!("{:<12} {:<12} {:<20} {:<15} {:<6}", 
+                    date_str, 
+                    truncate_string(&status, 10),
+                    truncate_string(&customer, 18),
+                    truncate_string(&work_item, 13),
+                    hours_str);
+            }
+        } else {
+            // Show empty row for dates with no entries
+            println!("{:<12} {:<12} {:<20} {:<15} {:<6}", date_str, "-", "-", "-", "-");
+        }
+    }
+    
+    println!("{}", "-".repeat(70));
+    println!("{:<12} {:<12} {:<20} {:<15} {:<6.1}", 
+        "TOTAL", "", "", "", total_hours);
+    println!("\nFound {} items across {} days", displayed_items, date_range.len());
+}
+
+// Helper function to display detailed items (original format)
+fn display_detailed_items(items: &[&Item], filter_date: Option<NaiveDate>, user_name: &str, filtered_items_len: usize, limit: usize) {
+    println!("\n=== FILTERED ITEMS for User {} ===", user_name);
+    
+    if let Some(date) = filter_date {
+        println!("Date filter: {}", date.format("%Y-%m-%d"));
+    }
+    
+    println!("Found {} items for user {}:", filtered_items_len, user_name);
+    
+    for (index, item) in items.iter().enumerate() {
+        let item_name = item.name.as_deref().unwrap_or("Unnamed");
+        let item_id = item.id.as_deref().unwrap_or("Unknown");
+        println!("\n{}. {} (ID: {})", index + 1, item_name, item_id);
+        
+        if !item.column_values.is_empty() {
+            println!("   Columns:");
+            let max_title_len = item.column_values.iter()
+                .map(|col| {
+                    let col_id = col.id.as_deref().unwrap_or("");
+                    map_column_title(col_id).len()
+                })
+                .max()
+                .unwrap_or(0);
+            
+            for col in &item.column_values {
+                if let Some(col_id) = &col.id {
+                    let column_title = map_column_title(col_id);
+                    
+                    if let Some(value) = &col.value {
+                        if value != "null" && !value.is_empty() {
+                            println!("     {:<width$} : {}", column_title, value, width = max_title_len);
+                        }
+                    } else if let Some(text) = &col.text {
+                        if !text.is_empty() && text != "null" {
+                            println!("     {:<width$} : {}", column_title, text, width = max_title_len);
+                        }
+                    }
+                }
+            }
+        } else {
+            println!("   No column values available");
+        }
+    }
+    
+    if filtered_items_len > limit {
+        println!("\n... and {} more items (showing first {} items)", 
+               filtered_items_len - limit, limit);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1255,6 +1350,20 @@ mod tests {
     }
 
     #[test]
+    fn test_cli_parsing_add() {
+        let result = Cli::try_parse_from(&["claim", "add", "-c", "test"]);
+        assert!(result.is_ok());
+        
+        let cli = result.unwrap();
+        match cli.command {
+            Some(Commands::Add { customer, .. }) => {
+                assert_eq!(customer, Some("test".to_string()));
+            }
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
     fn test_cli_parsing_query_with_days() {
         let result = Cli::try_parse_from(&["claim", "query", "-D", "2025-09-15", "-d", "5"]);
         assert!(result.is_ok());
@@ -1266,21 +1375,6 @@ mod tests {
                 assert_eq!(days, 5);
             }
             _ => panic!("Expected Query command"),
-        }
-    }
-
-
-    #[test]
-    fn test_cli_parsing_add() {
-        let result = Cli::try_parse_from(&["claim", "add", "-c", "test"]);
-        assert!(result.is_ok());
-        
-        let cli = result.unwrap();
-        match cli.command {
-            Some(Commands::Add { customer, .. }) => {
-                assert_eq!(customer, Some("test".to_string()));
-            }
-            _ => panic!("Expected Add command"),
         }
     }
 
@@ -1307,6 +1401,50 @@ mod tests {
         assert!(validate_date_flexible("2025.09.15").is_ok());
         assert!(validate_date_flexible("2025/09/15").is_ok());
         assert!(validate_date_flexible("invalid-date").is_err());
+    }
+
+    #[test]
+    fn test_extract_item_date() {
+        let mut item = Item::default();
+        let mut date_column = monday::ColumnValue::default();
+        date_column.id = Some("date4".to_string());
+        date_column.value = Some(r#"{"date": "2025-09-15"}"#.to_string());
+        item.column_values.push(date_column);
+
+        let extracted_date = extract_item_date(&item);
+        assert_eq!(extracted_date, Some("2025-09-15".to_string()));
+    }
+
+    #[test]
+    fn test_extract_column_value() {
+        let mut item = Item::default();
+        let mut text_column = monday::ColumnValue::default();
+        text_column.id = Some("text__1".to_string());
+        text_column.value = Some("Test Customer".to_string());
+        item.column_values.push(text_column);
+
+        let extracted_value = extract_column_value(&item, "text__1");
+        assert_eq!(extracted_value, "Test Customer");
+    }
+
+    #[test]
+    fn test_extract_status_value() {
+        let mut item = Item::default();
+        let mut status_column = monday::ColumnValue::default();
+        status_column.id = Some("status".to_string());
+        status_column.value = Some(r#"{"index": 1}"#.to_string());
+        item.column_values.push(status_column);
+
+        let extracted_status = extract_status_value(&item);
+        assert_eq!(extracted_status, "billable");
+    }
+
+    #[test]
+    fn test_truncate_string() {
+        assert_eq!(truncate_string("short", 10), "short");
+        assert_eq!(truncate_string("very long string", 10), "very l...");
+        assert_eq!(truncate_string("exact", 5), "exact");
+        assert_eq!(truncate_string("tiny", 2), "t...");
     }
 }
 
