@@ -26,7 +26,7 @@ enum Commands {
         #[arg(short, long, default_value_t = 5)]
         limit: usize,
         
-        /// Date to filter claims (YYYY-MM-DD, YYYY.MM.DD, or YYYY/MM/DD format)
+        /// Date to filter claims (YYYY-MM-DD, YYYY.MM.DD, or YYYY/MM/DD format, default: today)
         #[arg(short = 'D', long)]
         date: Option<String>,
         
@@ -141,7 +141,11 @@ async fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Some(Commands::Query { limit, date, days, verbose }) => {
             if verbose {
-                println!("Querying board for user's items (limit: {}, days: {})...", limit, days);
+                if date.is_none() {
+                    println!("Querying board for user's items (limit: {}, days: {}, date: today)...", limit, days);
+                } else {
+                    println!("Querying board for user's items (limit: {}, days: {})...", limit, days);
+                }
             }
             query_board(&client, &user, limit, date, days, verbose).await?;
         }
@@ -482,7 +486,7 @@ async fn query_board(
 ) -> Result<()> {
     let board_id = "6500270039";
     
-    // Handle date filtering if provided
+    // Handle date filtering - default to today if no date provided
     let (start_date, target_days) = if let Some(ref date_str) = date {
         // Validate the date format
         validate_date(date_str)?;
@@ -490,7 +494,9 @@ async fn query_board(
         let start_date = chrono::NaiveDate::parse_from_str(&normalized_date, "%Y-%m-%d")?;
         (Some(start_date), days)
     } else {
-        (None, 1) // If no date specified, default to single day behavior
+        // Default to today's date
+        let today = Local::now().naive_local().date();
+        (Some(today), days)
     };
     
     // Calculate the date range if start date is provided
@@ -515,6 +521,19 @@ async fn query_board(
             }
         } else {
             println!("Querying board {} for user '{}'...", board_id, user.name);
+        }
+    } else {
+        // Show brief info even in non-verbose mode
+        if let Some(start_date_val) = start_date {
+            if target_days > 1 {
+                let end_date = date_range.last().map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default();
+                println!("Querying date range: {} to {} ({} days)...", 
+                    start_date_val.format("%Y-%m-%d"),
+                    end_date,
+                    target_days);
+            } else {
+                println!("Querying date: {}...", start_date_val.format("%Y-%m-%d"));
+            }
         }
     }
     
@@ -613,7 +632,6 @@ async fn query_board(
     
     Ok(())
 }
-
 // Helper function to map activity type value back to name
 fn map_activity_value_to_name(value: u8) -> String {
     match value {
@@ -1441,9 +1459,10 @@ mod tests {
 
     #[test]
     fn test_truncate_string() {
-        assert_eq!(truncate_string("very long string", 9), "very l...");
-        assert_eq!(truncate_string("short st", 9), "short st");
-        assert_eq!(truncate_string("", 9), "");
+        assert_eq!(truncate_string("short", 10), "short");
+        assert_eq!(truncate_string("very long string", 10), "very lo...");
+        assert_eq!(truncate_string("exact", 5), "exact");
+        assert_eq!(truncate_string("tiny", 2), "...");
     }
 }
 
