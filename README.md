@@ -324,13 +324,18 @@ cargo build --release
 ```
 
 ## PROJECT STRUCTURE
+The project has been refactored into a modular structure:
+
 ```
 claim/
 ├── src/
-│   ├── main.rs      # Main application entry point
-│   └── config.rs    # Configuration management
-├── Cargo.toml       # Project dependencies and metadata
-└── README.md        # This file
+│ ├── main.rs # CLI setup, common utilities, and command routing
+│ ├── config.rs # Configuration management and API key handling
+│ ├── monday.rs # Monday.com API client and data structures
+│ ├── query.rs # All query-related functionality
+│ └── add.rs # All add-related functionality
+├── Cargo.toml # Project dependencies and metadata
+└── README.md # This file
 ```
 
 ## DEPENDENCIES
@@ -382,3 +387,4 @@ The application maps between human-readable activity types and their correspondi
 | boh1             | 9     |
 | boh2             | 10    |
 | boh3             | 11    |
+
