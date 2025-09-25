@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize};
+use anyhow::{anyhow, Result};
 use reqwest::Client;
-use anyhow::{Result, anyhow};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[derive(Debug, Serialize)]
@@ -89,7 +89,7 @@ where
     D: serde::Deserializer<'de>,
 {
     let value = Value::deserialize(deserializer)?;
-    
+
     match value {
         Value::Number(num) => num
             .as_i64()
@@ -107,7 +107,7 @@ where
     D: serde::Deserializer<'de>,
 {
     let value = Value::deserialize(deserializer)?;
-    
+
     match value {
         Value::Number(num) => Ok(num.to_string()),
         Value::String(s) => Ok(s),
@@ -127,7 +127,9 @@ fn extract_items_from_response(value: &Value) -> Result<Vec<Item>> {
                 if let Some(groups) = board.get("groups").and_then(|g| g.as_array()) {
                     for group in groups {
                         if let Some(items_page) = group.get("items_page") {
-                            if let Some(items_array) = items_page.get("items").and_then(|i| i.as_array()) {
+                            if let Some(items_array) =
+                                items_page.get("items").and_then(|i| i.as_array())
+                            {
                                 for item_val in items_array {
                                     let item = parse_item(item_val)?;
                                     items.push(item);
@@ -232,9 +234,12 @@ impl MondayClient {
         };
 
         let response = self.send_request(request_body, verbose).await?;
-        
+
         if verbose {
-            println!("User API response: {}", &response[..200.min(response.len())]);
+            println!(
+                "User API response: {}",
+                &response[..200.min(response.len())]
+            );
         }
 
         let monday_response: MondayResponse = serde_json::from_str(&response)
@@ -242,14 +247,19 @@ impl MondayClient {
 
         // Check for API errors
         if !monday_response.errors.is_empty() {
-            let error_messages: Vec<String> = monday_response.errors
+            let error_messages: Vec<String> = monday_response
+                .errors
                 .iter()
                 .map(|e| format!("{} (code: {})", e.message, e.error_code))
                 .collect();
-            return Err(anyhow!("Monday.com API errors: {}", error_messages.join(", ")));
+            return Err(anyhow!(
+                "Monday.com API errors: {}",
+                error_messages.join(", ")
+            ));
         }
 
-        monday_response.data
+        monday_response
+            .data
             .and_then(|data| data.me)
             .ok_or_else(|| anyhow!("No user data found in response"))
     }
@@ -261,7 +271,8 @@ impl MondayClient {
         user_id: i64,
         limit: usize,
     ) -> Result<Board> {
-        self.query_board_verbose(board_id, group_name, user_id, limit, false).await
+        self.query_board_verbose(board_id, group_name, user_id, limit, false)
+            .await
     }
 
     pub async fn query_board_verbose(
@@ -276,7 +287,7 @@ impl MondayClient {
         if verbose {
             println!("Getting board structure to find groups...");
         }
-        
+
         let query = format!(
             r#"
         {{
@@ -309,20 +320,26 @@ impl MondayClient {
 
         // Check for API errors
         if !monday_response.errors.is_empty() {
-            let error_messages: Vec<String> = monday_response.errors
+            let error_messages: Vec<String> = monday_response
+                .errors
                 .iter()
                 .map(|e| format!("{} (code: {})", e.message, e.error_code))
                 .collect();
-            return Err(anyhow!("Monday.com API errors: {}", error_messages.join(", ")));
+            return Err(anyhow!(
+                "Monday.com API errors: {}",
+                error_messages.join(", ")
+            ));
         }
 
-        let board = monday_response.data
+        let board = monday_response
+            .data
             .and_then(|data| data.boards)
             .and_then(|mut boards| boards.pop())
             .ok_or_else(|| anyhow!("No board found with ID {}", board_id))?;
 
         // Find the group with the matching name
-        let group_id = board.groups
+        let group_id = board
+            .groups
             .as_ref()
             .ok_or_else(|| anyhow!("No groups found in board"))?
             .iter()
@@ -371,41 +388,51 @@ impl MondayClient {
         let items_response = self.send_request(items_request_body, verbose).await?;
 
         if verbose {
-            println!("Items response: {}", &items_response[..500.min(items_response.len())]);
+            println!(
+                "Items response: {}",
+                &items_response[..500.min(items_response.len())]
+            );
         }
 
         // Parse the response with better error handling
-        let items_monday_response: Result<MondayResponse, _> = serde_json::from_str(&items_response);
-        
+        let items_monday_response: Result<MondayResponse, _> =
+            serde_json::from_str(&items_response);
+
         let items_monday_response = match items_monday_response {
             Ok(response) => response,
             Err(e) => {
                 if verbose {
-                    println!("Standard parsing failed: {}, trying manual extraction...", e);
+                    println!(
+                        "Standard parsing failed: {}, trying manual extraction...",
+                        e
+                    );
                 }
-                manually_parse_response(&items_response).unwrap_or_else(|_| {
-                    MondayResponse {
-                        data: None,
-                        errors: vec![MondayError {
-                            message: format!("Failed to parse response: {}", e),
-                            error_code: "PARSE_ERROR".to_string(),
-                        }],
-                    }
+                manually_parse_response(&items_response).unwrap_or_else(|_| MondayResponse {
+                    data: None,
+                    errors: vec![MondayError {
+                        message: format!("Failed to parse response: {}", e),
+                        error_code: "PARSE_ERROR".to_string(),
+                    }],
                 })
             }
         };
 
         // Check for API errors
         if !items_monday_response.errors.is_empty() {
-            let error_messages: Vec<String> = items_monday_response.errors
+            let error_messages: Vec<String> = items_monday_response
+                .errors
                 .iter()
                 .map(|e| format!("{} (code: {})", e.message, e.error_code))
                 .collect();
-            return Err(anyhow!("Monday.com API errors: {}", error_messages.join(", ")));
+            return Err(anyhow!(
+                "Monday.com API errors: {}",
+                error_messages.join(", ")
+            ));
         }
 
         // Extract the board with items from the response
-        let mut items_board = items_monday_response.data
+        let mut items_board = items_monday_response
+            .data
             .and_then(|data| data.boards)
             .and_then(|mut boards| boards.pop())
             .ok_or_else(|| anyhow!("No board data found in items response"))?;
@@ -417,10 +444,14 @@ impl MondayClient {
                     let original_count = items_page.items.len();
                     items_page.items.retain(|item| is_user_item(item, user_id));
                     if verbose {
-                        println!("Filtered {} items down to {} items for user {}", 
-                                original_count, items_page.items.len(), user_id);
+                        println!(
+                            "Filtered {} items down to {} items for user {}",
+                            original_count,
+                            items_page.items.len(),
+                            user_id
+                        );
                     }
-                    
+
                     // Limit to the requested number of items
                     if items_page.items.len() > limit {
                         items_page.items.truncate(limit);
@@ -431,13 +462,15 @@ impl MondayClient {
 
         // Merge the filtered results back into the original board structure
         let mut result_board = board.clone();
-        
+
         // Replace just the items in the target group with the filtered items
         if let Some(result_groups) = &mut result_board.groups {
             if let Some(filtered_groups) = &items_board.groups {
                 for result_group in result_groups {
                     if result_group.title == group_name {
-                        if let Some(filtered_group) = filtered_groups.iter().find(|g| g.id == result_group.id) {
+                        if let Some(filtered_group) =
+                            filtered_groups.iter().find(|g| g.id == result_group.id)
+                        {
                             result_group.items_page = filtered_group.items_page.clone();
                         }
                         break;
@@ -456,7 +489,8 @@ impl MondayClient {
         item_name: &str,
         column_values: &serde_json::Value,
     ) -> Result<String> {
-        self.create_item_verbose(board_id, group_id, item_name, column_values, false).await
+        self.create_item_verbose(board_id, group_id, item_name, column_values, false)
+            .await
     }
 
     pub async fn create_item_verbose(
@@ -495,7 +529,7 @@ impl MondayClient {
         };
 
         let response = self.send_request(request_body, verbose).await?;
-        
+
         if verbose {
             println!("Create item response: {}", response);
         }
@@ -504,11 +538,15 @@ impl MondayClient {
             .map_err(|e| anyhow!("Failed to parse create item response: {}", e))?;
 
         if !monday_response.errors.is_empty() {
-            let error_messages: Vec<String> = monday_response.errors
+            let error_messages: Vec<String> = monday_response
+                .errors
                 .iter()
                 .map(|e| format!("{} (code: {})", e.message, e.error_code))
                 .collect();
-            return Err(anyhow!("Monday.com API errors: {}", error_messages.join(", ")));
+            return Err(anyhow!(
+                "Monday.com API errors: {}",
+                error_messages.join(", ")
+            ));
         }
 
         // Parse the response to get the created item ID
@@ -533,14 +571,14 @@ impl MondayClient {
         let mut all_items = Vec::new();
         let mut cursor: Option<String> = None;
         let page_size = 100; // Monday.com API max page size
-        
+
         loop {
             let cursor_clause = if let Some(cursor_str) = &cursor {
                 format!(", cursor: \"{}\"", cursor_str)
             } else {
                 String::new()
             };
-            
+
             let query = format!(
                 r#"
             {{
@@ -562,7 +600,11 @@ impl MondayClient {
                 }}
             }}
             "#,
-                board_id, group_id, page_size.min(limit - all_items.len()), user_name, cursor_clause
+                board_id,
+                group_id,
+                page_size.min(limit - all_items.len()),
+                user_name,
+                cursor_clause
             );
 
             if verbose {
@@ -573,7 +615,10 @@ impl MondayClient {
             let response = self.send_request(request_body, verbose).await?;
 
             if verbose {
-                println!("Paginated query response: {}", &response[..500.min(response.len())]);
+                println!(
+                    "Paginated query response: {}",
+                    &response[..500.min(response.len())]
+                );
             }
 
             // Parse the response manually to handle the nested structure correctly
@@ -585,7 +630,10 @@ impl MondayClient {
                 .map_err(|e| anyhow!("Failed to extract items from response: {}", e))?;
 
             if verbose {
-                println!("Successfully extracted {} items from page", page_items.len());
+                println!(
+                    "Successfully extracted {} items from page",
+                    page_items.len()
+                );
             }
 
             all_items.append(&mut page_items);
@@ -598,7 +646,9 @@ impl MondayClient {
                             for group in groups {
                                 if let Some(items_page) = group.get("items_page") {
                                     // Check if there's a next page
-                                    if let Some(next_cursor) = items_page.get("cursor").and_then(|c| c.as_str()) {
+                                    if let Some(next_cursor) =
+                                        items_page.get("cursor").and_then(|c| c.as_str())
+                                    {
                                         if !next_cursor.is_empty() && all_items.len() < limit {
                                             cursor = Some(next_cursor.to_string());
                                             continue;
@@ -610,7 +660,7 @@ impl MondayClient {
                     }
                 }
             }
-            
+
             break;
         }
 
@@ -630,8 +680,9 @@ impl MondayClient {
         if verbose {
             println!("Sending request to Monday.com API...");
         }
-        
-        let response = self.client
+
+        let response = self
+            .client
             .post("https://api.monday.com/v2")
             .header("Authorization", &self.api_key)
             .header("Content-Type", "application/json")
@@ -643,11 +694,15 @@ impl MondayClient {
 
         if !response.status().is_success() {
             let status = response.status();
-            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
             return Err(anyhow!("Monday.com API error ({}): {}", status, error_text));
         }
 
-        response.text()
+        response
+            .text()
             .await
             .map_err(|e| anyhow!("Failed to read response text: {}", e))
     }
@@ -666,52 +721,87 @@ impl MondayClient {
 // Helper function to manually parse response if standard parsing fails
 fn manually_parse_response(response: &str) -> Result<MondayResponse, anyhow::Error> {
     let value: Value = serde_json::from_str(response)?;
-    
+
     let mut boards = Vec::new();
     if let Some(data) = value.get("data") {
         if let Some(boards_array) = data.get("boards").and_then(|b| b.as_array()) {
             for board_val in boards_array {
-                let board_id = board_val.get("id").and_then(|id| id.as_str()).unwrap_or("unknown").to_string();
-                let board_name = board_val.get("name").and_then(|name| name.as_str()).unwrap_or("unknown").to_string();
-                
+                let board_id = board_val
+                    .get("id")
+                    .and_then(|id| id.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let board_name = board_val
+                    .get("name")
+                    .and_then(|name| name.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+
                 let mut board = Board {
                     id: board_id,
                     name: board_name,
                     groups: None,
                 };
-                
+
                 if let Some(groups_array) = board_val.get("groups").and_then(|g| g.as_array()) {
                     let mut groups = Vec::new();
                     for group_val in groups_array {
-                        let group_id = group_val.get("id").and_then(|id| id.as_str()).unwrap_or("unknown").to_string();
-                        let group_title = group_val.get("title").and_then(|title| title.as_str()).unwrap_or("unknown").to_string();
-                        
+                        let group_id = group_val
+                            .get("id")
+                            .and_then(|id| id.as_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        let group_title = group_val
+                            .get("title")
+                            .and_then(|title| title.as_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+
                         let mut group = Group {
                             id: group_id,
                             title: group_title,
                             items_page: None,
                         };
-                        
+
                         if let Some(items_page_val) = group_val.get("items_page") {
                             let mut items_page = ItemsPage { items: Vec::new() };
-                            
-                            if let Some(items_array) = items_page_val.get("items").and_then(|i| i.as_array()) {
+
+                            if let Some(items_array) =
+                                items_page_val.get("items").and_then(|i| i.as_array())
+                            {
                                 for item_val in items_array {
-                                    let item_id = item_val.get("id").and_then(|id| id.as_str()).map(|s| s.to_string());
-                                    let item_name = item_val.get("name").and_then(|name| name.as_str()).map(|s| s.to_string());
-                                    
+                                    let item_id = item_val
+                                        .get("id")
+                                        .and_then(|id| id.as_str())
+                                        .map(|s| s.to_string());
+                                    let item_name = item_val
+                                        .get("name")
+                                        .and_then(|name| name.as_str())
+                                        .map(|s| s.to_string());
+
                                     let mut item = Item {
                                         id: item_id,
                                         name: item_name,
                                         column_values: Vec::new(),
                                     };
-                                    
-                                    if let Some(columns_array) = item_val.get("column_values").and_then(|c| c.as_array()) {
+
+                                    if let Some(columns_array) =
+                                        item_val.get("column_values").and_then(|c| c.as_array())
+                                    {
                                         for col_val in columns_array {
-                                            let col_id = col_val.get("id").and_then(|id| id.as_str()).map(|s| s.to_string());
-                                            let col_value = col_val.get("value").and_then(|v| v.as_str()).map(|s| s.to_string());
-                                            let col_text = col_val.get("text").and_then(|t| t.as_str()).map(|s| s.to_string());
-                                            
+                                            let col_id = col_val
+                                                .get("id")
+                                                .and_then(|id| id.as_str())
+                                                .map(|s| s.to_string());
+                                            let col_value = col_val
+                                                .get("value")
+                                                .and_then(|v| v.as_str())
+                                                .map(|s| s.to_string());
+                                            let col_text = col_val
+                                                .get("text")
+                                                .and_then(|t| t.as_str())
+                                                .map(|s| s.to_string());
+
                                             let column = ColumnValue {
                                                 id: col_id,
                                                 value: col_value,
@@ -720,25 +810,25 @@ fn manually_parse_response(response: &str) -> Result<MondayResponse, anyhow::Err
                                             item.column_values.push(column);
                                         }
                                     }
-                                    
+
                                     items_page.items.push(item);
                                 }
                             }
-                            
+
                             group.items_page = Some(items_page);
                         }
-                        
+
                         groups.push(group);
                     }
-                    
+
                     board.groups = Some(groups);
                 }
-                
+
                 boards.push(board);
             }
         }
     }
-    
+
     Ok(MondayResponse {
         data: Some(MondayData {
             me: None,
@@ -759,7 +849,9 @@ fn is_user_item(item: &Item, user_id: i64) -> bool {
                         if let Some(persons) = parsed_value.get("personsAndTeams") {
                             if let Some(persons_array) = persons.as_array() {
                                 for person in persons_array {
-                                    if let Some(person_id) = person.get("id").and_then(|id| id.as_i64()) {
+                                    if let Some(person_id) =
+                                        person.get("id").and_then(|id| id.as_i64())
+                                    {
                                         if person_id == user_id {
                                             return true;
                                         }
@@ -793,7 +885,7 @@ mod tests {
             #[serde(deserialize_with = "deserialize_id")]
             id: i64,
         }
-        
+
         let result: Result<TestStruct, _> = serde_json::from_str(json_string);
         assert!(result.is_ok());
         assert_eq!(result.unwrap().id, 123);
@@ -807,7 +899,7 @@ mod tests {
             #[serde(deserialize_with = "deserialize_id")]
             id: i64,
         }
-        
+
         let result: Result<TestStruct, _> = serde_json::from_str(json_number);
         assert!(result.is_ok());
         assert_eq!(result.unwrap().id, 123);
@@ -821,7 +913,7 @@ mod tests {
             #[serde(deserialize_with = "deserialize_string_id")]
             id: String,
         }
-        
+
         let result: Result<TestStruct, _> = serde_json::from_str(json_string);
         assert!(result.is_ok());
         assert_eq!(result.unwrap().id, "test_id");
@@ -835,7 +927,7 @@ mod tests {
             #[serde(deserialize_with = "deserialize_string_id")]
             id: String,
         }
-        
+
         let result: Result<TestStruct, _> = serde_json::from_str(json_number);
         assert!(result.is_ok());
         assert_eq!(result.unwrap().id, "123");

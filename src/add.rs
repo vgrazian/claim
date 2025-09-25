@@ -1,6 +1,6 @@
 use crate::monday::{Board, MondayClient, MondayUser};
 use crate::{calculate_working_dates, map_activity_type_to_value, normalize_date, validate_date};
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use chrono::prelude::*;
 use serde_json::json;
 use std::io;

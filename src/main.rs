@@ -3,7 +3,7 @@ mod config;
 mod monday;
 mod query;
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use chrono::prelude::*;
 use clap::{Parser, Subcommand};
 use config::Config;
