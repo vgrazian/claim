@@ -1,4 +1,3 @@
-// src/utils.rs
 use anyhow::{anyhow, Result};
 use chrono::prelude::*;
 use std::time::{Duration, Instant};
@@ -319,6 +318,128 @@ where
     }
 }
 
+// ===== ITEM PROCESSING UTILITIES =====
+
+/// Helper function to extract date from an item column values
+pub fn extract_item_date(column_values: &[crate::monday::ColumnValue]) -> Option<String> {
+    for col in column_values {
+        if let Some(col_id) = &col.id {
+            if col_id == "date4" {
+                // Try to parse from value field (JSON format)
+                if let Some(value) = &col.value {
+                    if value != "null" && !value.is_empty() {
+                        if let Ok(parsed_value) = serde_json::from_str::<serde_json::Value>(value) {
+                            if let Some(date_obj) = parsed_value.get("date") {
+                                if let Some(date_str) = date_obj.as_str() {
+                                    // Normalize the date format to YYYY-MM-DD
+                                    if let Ok(naive_date) =
+                                        NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+                                    {
+                                        return Some(naive_date.format("%Y-%m-%d").to_string());
+                                    }
+                                    // Try other common date formats
+                                    if let Ok(naive_date) =
+                                        NaiveDate::parse_from_str(date_str, "%Y/%m/%d")
+                                    {
+                                        return Some(naive_date.format("%Y-%m-%d").to_string());
+                                    }
+                                    if let Ok(naive_date) =
+                                        NaiveDate::parse_from_str(date_str, "%Y.%m.%d")
+                                    {
+                                        return Some(naive_date.format("%Y-%m-%d").to_string());
+                                    }
+                                    // Return the original string if parsing fails
+                                    return Some(date_str.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+                // Fallback: try to parse from text field
+                if let Some(text) = &col.text {
+                    if !text.is_empty() && text != "null" {
+                        // Normalize the date format
+                        if let Ok(naive_date) = NaiveDate::parse_from_str(text, "%Y-%m-%d") {
+                            return Some(naive_date.format("%Y-%m-%d").to_string());
+                        }
+                        if let Ok(naive_date) = NaiveDate::parse_from_str(text, "%Y/%m/%d") {
+                            return Some(naive_date.format("%Y-%m-%d").to_string());
+                        }
+                        if let Ok(naive_date) = NaiveDate::parse_from_str(text, "%Y.%m.%d") {
+                            return Some(naive_date.format("%Y-%m-%d").to_string());
+                        }
+                        return Some(text.to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Helper function to extract specific column value
+pub fn extract_column_value(
+    column_values: &[crate::monday::ColumnValue],
+    column_id: &str,
+) -> String {
+    for col in column_values {
+        if let Some(col_id) = &col.id {
+            if col_id == column_id {
+                if let Some(value) = &col.value {
+                    if value != "null" && !value.is_empty() {
+                        // Try to parse JSON value for complex columns
+                        if let Ok(parsed_value) = serde_json::from_str::<serde_json::Value>(value) {
+                            if let Some(text) = parsed_value.as_str() {
+                                return text.to_string();
+                            }
+                        }
+                        return value.to_string();
+                    }
+                }
+                if let Some(text) = &col.text {
+                    if !text.is_empty() && text != "null" {
+                        return text.to_string();
+                    }
+                }
+            }
+        }
+    }
+    "".to_string()
+}
+
+/// Helper function to check if an item matches the specified date
+pub fn is_item_matching_date(
+    column_values: &[crate::monday::ColumnValue],
+    target_date: &str,
+) -> bool {
+    for col in column_values {
+        if let Some(col_id) = &col.id {
+            if col_id == "date4" {
+                // Parse the date column value to check if it matches the target date
+                if let Some(value) = &col.value {
+                    if let Ok(parsed_value) = serde_json::from_str::<serde_json::Value>(value) {
+                        if let Some(date_obj) = parsed_value.get("date") {
+                            if let Some(date_str) = date_obj.as_str() {
+                                // Compare the date part only (ignore time if present)
+                                if date_str.starts_with(target_date) {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+                // Also check the text field as fallback
+                if let Some(text) = &col.text {
+                    if text.starts_with(target_date) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -446,5 +567,12 @@ mod tests {
 
         let weekend_date = NaiveDate::from_ymd_opt(2025, 9, 13).unwrap(); // Saturday
         assert!(is_weekend(&weekend_date));
+    }
+
+    #[test]
+    fn test_get_current_year() {
+        let year = get_current_year();
+        let current_year = Local::now().year();
+        assert_eq!(year, current_year);
     }
 }

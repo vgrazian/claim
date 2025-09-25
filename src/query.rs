@@ -82,65 +82,101 @@ pub async fn handle_query_command(
         }
     }
 
-    // Use a special method to query by user name instead of user ID
-    // Increased limit to catch all possible items
+    // First, get the current year's group ID
+    let current_year = get_current_year().to_string();
+    let board = client
+        .query_board_verbose(board_id, &current_year, user.id, 1, verbose)
+        .await?;
+
+    let group_id = get_year_group_id(&board, &current_year);
+
+    if verbose {
+        println!("Using group ID: {} for year: {}", group_id, current_year);
+    }
+
+    // Use the method to query ALL items in the group (this method has working pagination)
     let items = client
-        .query_items_by_user_name(board_id, "new_group_mkkbbd2q", &user.name, 1000, verbose)
+        .query_all_items_in_group(board_id, &group_id, 5000, verbose)
         .await?;
 
     if verbose {
-        println!("\n=== Raw items found for user: {} ===", items.len());
-        // Debug: show all dates found
+        println!("\n=== Raw items found in group: {} ===", items.len());
+        // Debug: show dates found
+        let mut date_count = 0;
         for (i, item) in items.iter().enumerate() {
             if let Some(item_date) = extract_item_date(item) {
-                println!("Item {}: {}", i + 1, item_date);
-            } else {
-                println!("Item {}: [No date found]", i + 1);
+                if date_count < 10 {
+                    // Show first 10 dates only
+                    println!("Item {}: {}", i + 1, item_date);
+                    date_count += 1;
+                }
             }
+        }
+        if items.len() > 10 {
+            println!("... and {} more items", items.len() - 10);
         }
     }
 
-    // Filter items by date range if date filter is provided
-    let filtered_items: Vec<&Item> = if start_date.is_some() {
-        if !date_range.is_empty() {
-            let filtered: Vec<&Item> = items
-                .iter()
-                .filter(|item| is_item_matching_date_range(item, &date_range))
-                .collect();
+    // Filter items by user first (more efficient)
+    let user_items: Vec<&Item> = items
+        .iter()
+        .filter(|item| is_user_item(item, user.id))
+        .collect();
 
-            if verbose {
-                println!("After date range filtering: {} items", filtered.len());
-                for item in &filtered {
-                    if let Some(item_date) = extract_item_date(item) {
-                        println!("Filtered item date: {}", item_date);
-                    }
+    if verbose {
+        println!("After user filtering: {} items", user_items.len());
+
+        // Show dates of user items for debugging
+        let mut user_date_count = 0;
+        for (i, item) in user_items.iter().enumerate() {
+            if let Some(item_date) = extract_item_date(item) {
+                if user_date_count < 10 {
+                    println!("User item {}: {}", i + 1, item_date);
+                    user_date_count += 1;
                 }
             }
-            filtered
-        } else {
-            items.iter().collect()
         }
+        if user_items.len() > 10 {
+            println!("... and {} more user items", user_items.len() - 10);
+        }
+    }
+
+    // Then filter by date range if date filter is provided
+    let filtered_items: Vec<&Item> = if start_date.is_some() && !date_range.is_empty() {
+        let filtered: Vec<&Item> = user_items
+            .iter()
+            .filter(|item| is_item_matching_date_range(item, &date_range))
+            .cloned()
+            .collect();
+
+        if verbose {
+            println!("After date range filtering: {} items", filtered.len());
+            for item in &filtered {
+                if let Some(item_date) = extract_item_date(item) {
+                    println!("Matching item date: {}", item_date);
+                }
+            }
+        }
+        filtered
     } else {
-        items.iter().collect()
+        user_items.iter().cloned().collect()
     };
 
     let limited_items: Vec<&Item> = filtered_items.iter().take(limit).cloned().collect();
-    let limited_items_len = limited_items.len();
     let filtered_items_len = filtered_items.len();
 
     if verbose {
         println!(
-            "\n=== Filtered items matching date criteria: {} ===",
+            "\n=== Filtered items matching criteria: {} ===",
             filtered_items_len
         );
     }
 
-    // Display the results in a simplified table format for multi-day queries
+    // Display the results
     if !filtered_items.is_empty() {
         if let Some(start_date_val) = start_date {
             if target_days > 1 {
                 // Multi-day query - show simplified table
-                // Use filtered_items to see all matching items
                 display_simplified_table(&filtered_items, &date_range, &user.name, verbose);
             } else {
                 // Single day query - show detailed format
@@ -176,10 +212,53 @@ pub async fn handle_query_command(
         }
         println!("This means either:");
         println!("1. No items exist for this user for the specified date(s)");
-        println!(
-            "2. The user name in Monday.com differs from '{}'",
-            user.name
-        );
+        println!("2. The items are in a different group/year");
+        println!("3. The date format in Monday.com differs from expected");
+
+        // Additional debug info
+        if verbose {
+            println!("\n=== DEBUG INFO ===");
+            println!("Total items in group: {}", items.len());
+            println!("Items for user: {}", user_items.len());
+            println!(
+                "Date range searched: {:?}",
+                date_range
+                    .iter()
+                    .map(|d| d.format("%Y-%m-%d").to_string())
+                    .collect::<Vec<_>>()
+            );
+
+            // Show some example dates from user items
+            println!("Example dates from user items:");
+            let mut example_count = 0;
+            for item in user_items.iter().take(5) {
+                if let Some(date) = extract_item_date(item) {
+                    println!("  - {}", date);
+                    example_count += 1;
+                }
+            }
+            if example_count == 0 {
+                println!("  No dates could be extracted from user items");
+            }
+
+            // Also check if we have items from September 2025 in the raw data
+            println!("Checking for September 2025 items in raw data:");
+            let mut sept_count = 0;
+            for item in &items {
+                if let Some(date) = extract_item_date(item) {
+                    if date.starts_with("2025-09") {
+                        println!("  - {} (ID: {:?})", date, item.id);
+                        sept_count += 1;
+                        if sept_count >= 5 {
+                            break;
+                        }
+                    }
+                }
+            }
+            if sept_count == 0 {
+                println!("  No September 2025 items found in raw data");
+            }
+        }
     }
 
     if let Some(start_date_val) = start_date {
@@ -204,6 +283,53 @@ pub async fn handle_query_command(
     }
 
     Ok(())
+}
+
+// Helper function to get year group ID
+fn get_year_group_id(board: &crate::monday::Board, year: &str) -> String {
+    if let Some(groups) = &board.groups {
+        for group in groups {
+            if group.title == year {
+                return group.id.clone();
+            }
+        }
+    }
+    // Fallback to default group ID
+    "new_group_mkkbbd2q".to_string()
+}
+
+// Helper function to check if an item belongs to a user
+fn is_user_item(item: &Item, user_id: i64) -> bool {
+    for col in &item.column_values {
+        if let Some(col_id) = &col.id {
+            if col_id == "person" {
+                if let Some(value) = &col.value {
+                    if let Ok(parsed_value) = serde_json::from_str::<serde_json::Value>(value) {
+                        if let Some(persons) = parsed_value.get("personsAndTeams") {
+                            if let Some(persons_array) = persons.as_array() {
+                                for person in persons_array {
+                                    if let Some(person_id) =
+                                        person.get("id").and_then(|id| id.as_i64())
+                                    {
+                                        if person_id == user_id {
+                                            return true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                // Also check text field
+                if let Some(text) = &col.text {
+                    if text.contains(&user_id.to_string()) || text == "Valerio Graziani" {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
 }
 
 // Helper function to check if an item matches the specified date
@@ -277,6 +403,18 @@ fn extract_column_value(item: &Item, column_id: &str) -> String {
                             if let Some(text) = parsed_value.as_str() {
                                 return text.to_string();
                             }
+                            // For person columns, try to extract name
+                            if let Some(persons) = parsed_value.get("personsAndTeams") {
+                                if let Some(persons_array) = persons.as_array() {
+                                    if let Some(first_person) = persons_array.first() {
+                                        if let Some(name) =
+                                            first_person.get("name").and_then(|n| n.as_str())
+                                        {
+                                            return name.to_string();
+                                        }
+                                    }
+                                }
+                            }
                         }
                         return value.to_string();
                     }
@@ -340,44 +478,11 @@ fn display_simplified_table(
     println!("Date Range: {} to {}", start_date, end_date);
 
     if verbose {
-        // Debug: Show what dates we found in the items
-        println!("Debug: Processing {} items with dates:", items.len());
-        for (i, item) in items.iter().enumerate() {
-            if let Some(item_date) = extract_item_date(item) {
-                println!("  Item {}: {}", i + 1, item_date);
-            } else {
-                println!("  Item {}: [No date found]", i + 1);
-            }
-        }
-
-        // Add detailed debug for date extraction
         println!(
-            "=== DEBUG: Verifying date extraction for all {} items ===",
-            items.len()
+            "Processing {} items across {} dates",
+            items.len(),
+            date_range.len()
         );
-        let mut success_count = 0;
-        for (i, item) in items.iter().enumerate() {
-            if let Some(date) = extract_item_date(item) {
-                success_count += 1;
-                println!("  Item {}: ✓ Extracted date: {}", i + 1, date);
-            } else {
-                println!("  Item {}: ✗ Failed to extract date", i + 1);
-                // Debug the item structure
-                println!("    Item ID: {:?}", item.id);
-                println!("    Item name: {:?}", item.name);
-                println!("    Column count: {}", item.column_values.len());
-                for (j, col) in item.column_values.iter().enumerate() {
-                    println!(
-                        "    Column {}: ID={:?}, Value={:?}, Text={:?}",
-                        j + 1,
-                        col.id,
-                        col.value,
-                        col.text
-                    );
-                }
-            }
-        }
-        println!("Date extraction success: {}/{}", success_count, items.len());
     }
 
     // Create a table header with Status column
@@ -393,30 +498,11 @@ fn display_simplified_table(
 
     for item in items {
         if let Some(item_date) = extract_item_date(item) {
-            // Ensure the date is in YYYY-MM-DD format
-            let normalized_date = match chrono::NaiveDate::parse_from_str(&item_date, "%Y-%m-%d") {
-                Ok(date) => date.format("%Y-%m-%d").to_string(),
-                Err(_) => item_date, // Use as-is if parsing fails
-            };
             items_by_date
-                .entry(normalized_date)
+                .entry(item_date)
                 .or_insert_with(Vec::new)
                 .push(item);
         }
-    }
-
-    if verbose {
-        // Debug: Show what dates we have in the map
-        let mut dates: Vec<String> = items_by_date.keys().cloned().collect();
-        dates.sort();
-        println!("Debug: Unique dates in HashMap: {:?}", dates);
-        println!(
-            "Debug: Date range to display: {:?}",
-            date_range
-                .iter()
-                .map(|d| d.format("%Y-%m-%d").to_string())
-                .collect::<Vec<_>>()
-        );
     }
 
     // Display items in date range order
@@ -596,6 +682,11 @@ pub fn extract_item_date(item: &Item) -> Option<String> {
         }
     }
     None
+}
+
+// Helper function to get current year
+fn get_current_year() -> i32 {
+    Local::now().year()
 }
 
 #[cfg(test)]

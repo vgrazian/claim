@@ -49,6 +49,7 @@ pub struct Group {
 pub struct ItemsPage {
     #[serde(default)]
     pub items: Vec<Item>,
+    pub cursor: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -117,8 +118,9 @@ where
 }
 
 // Helper function to extract items from the JSON response
-fn extract_items_from_response(value: &Value) -> Result<Vec<Item>> {
+fn extract_items_from_response(value: &Value) -> Result<(Vec<Item>, Option<String>)> {
     let mut items = Vec::new();
+    let mut cursor = None;
 
     // Navigate through the nested structure: data -> boards -> groups -> items_page -> items
     if let Some(data) = value.get("data") {
@@ -127,6 +129,16 @@ fn extract_items_from_response(value: &Value) -> Result<Vec<Item>> {
                 if let Some(groups) = board.get("groups").and_then(|g| g.as_array()) {
                     for group in groups {
                         if let Some(items_page) = group.get("items_page") {
+                            // Extract cursor
+                            if let Some(cursor_val) =
+                                items_page.get("cursor").and_then(|c| c.as_str())
+                            {
+                                if !cursor_val.is_empty() {
+                                    cursor = Some(cursor_val.to_string());
+                                }
+                            }
+
+                            // Extract items
                             if let Some(items_array) =
                                 items_page.get("items").and_then(|i| i.as_array())
                             {
@@ -142,7 +154,7 @@ fn extract_items_from_response(value: &Value) -> Result<Vec<Item>> {
         }
     }
 
-    Ok(items)
+    Ok((items, cursor))
 }
 
 // Helper function to parse an individual item from JSON
@@ -363,6 +375,7 @@ impl MondayClient {
                     id
                     title
                     items_page(limit: {}) {{
+                        cursor
                         items {{
                             id
                             name
@@ -559,7 +572,7 @@ impl MondayClient {
         }
     }
 
-    // In monday.rs, update the query_items_by_user_name method to handle pagination:
+    // Fixed pagination logic for user name queries
     pub async fn query_items_by_user_name(
         &self,
         board_id: &str,
@@ -570,98 +583,245 @@ impl MondayClient {
     ) -> Result<Vec<Item>> {
         let mut all_items = Vec::new();
         let mut cursor: Option<String> = None;
-        let page_size = 100; // Monday.com API max page size
+        let page_size = 100;
+        let mut total_pages = 0;
+
+        if verbose {
+            println!("Starting paginated query for user '{}'", user_name);
+        }
 
         loop {
-            let cursor_clause = if let Some(cursor_str) = &cursor {
-                format!(", cursor: \"{}\"", cursor_str)
-            } else {
-                String::new()
-            };
+            total_pages += 1;
 
-            let query = format!(
-                r#"
-            {{
-                boards(ids: ["{}"]) {{
-                    groups(ids: ["{}"]) {{
-                        items_page(limit: {}, query_params: {{rules: [{{column_id: "name", compare_value: ["{}"]}}]}}{}) {{
-                            cursor
-                            items {{
-                                id
-                                name
-                                column_values {{
-                                    id
-                                    value
-                                    text
+            // Build the query with proper cursor handling
+            let query = if let Some(cursor_str) = &cursor {
+                format!(
+                    r#"
+                    {{
+                        boards(ids: ["{}"]) {{
+                            groups(ids: ["{}"]) {{
+                                items_page(limit: {}, query_params: {{rules: [{{column_id: "name", compare_value: ["{}"]}}]}}, cursor: "{}") {{
+                                    cursor
+                                    items {{
+                                        id
+                                        name
+                                        column_values {{
+                                            id
+                                            value
+                                            text
+                                        }}
+                                    }}
                                 }}
                             }}
                         }}
                     }}
-                }}
-            }}
-            "#,
-                board_id,
-                group_id,
-                page_size.min(limit - all_items.len()),
-                user_name,
-                cursor_clause
-            );
+                    "#,
+                    board_id, group_id, page_size, user_name, cursor_str
+                )
+            } else {
+                format!(
+                    r#"
+                    {{
+                        boards(ids: ["{}"]) {{
+                            groups(ids: ["{}"]) {{
+                                items_page(limit: {}, query_params: {{rules: [{{column_id: "name", compare_value: ["{}"]}}]}}) {{
+                                    cursor
+                                    items {{
+                                        id
+                                        name
+                                        column_values {{
+                                            id
+                                            value
+                                            text
+                                        }}
+                                    }}
+                                }}
+                            }}
+                        }}
+                    }}
+                    "#,
+                    board_id, group_id, page_size, user_name
+                )
+            };
 
             if verbose {
-                println!("Sending paginated user name query (cursor: {:?})", cursor);
+                println!(
+                    "Sending paginated user name query (page {}, cursor: {:?})",
+                    total_pages, cursor
+                );
             }
 
             let request_body = MondayRequest { query };
             let response = self.send_request(request_body, verbose).await?;
 
-            if verbose {
-                println!(
-                    "Paginated query response: {}",
-                    &response[..500.min(response.len())]
-                );
-            }
-
-            // Parse the response manually to handle the nested structure correctly
+            // Parse the response
             let value: Value = serde_json::from_str(&response)
                 .map_err(|e| anyhow!("Failed to parse JSON response: {}", e))?;
 
-            // Extract items from the nested JSON structure
-            let mut page_items = extract_items_from_response(&value)
+            // Extract items and cursor
+            let (page_items, next_cursor) = extract_items_from_response(&value)
                 .map_err(|e| anyhow!("Failed to extract items from response: {}", e))?;
 
             if verbose {
+                println!("Page {}: Extracted {} items", total_pages, page_items.len());
+            }
+
+            all_items.extend(page_items);
+
+            // Check if we have more pages or reached the limit
+            if let Some(next_cursor_val) = next_cursor {
+                if !next_cursor_val.is_empty() && all_items.len() < limit {
+                    cursor = Some(next_cursor_val);
+
+                    // Add a small delay to avoid rate limiting
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+
+            // Safety limit
+            if total_pages > 20 {
+                if verbose {
+                    println!("Reached safety limit of 20 pages");
+                }
+                break;
+            }
+        }
+
+        if verbose {
+            println!("Total items collected: {}", all_items.len());
+        }
+
+        // Limit the final result
+        if all_items.len() > limit {
+            all_items.truncate(limit);
+        }
+
+        Ok(all_items)
+    }
+
+    // Method to query ALL items in a group (without user filtering)
+    pub async fn query_all_items_in_group(
+        &self,
+        board_id: &str,
+        group_id: &str,
+        limit: usize,
+        verbose: bool,
+    ) -> Result<Vec<Item>> {
+        let mut all_items = Vec::new();
+        let mut cursor: Option<String> = None;
+        let page_size = 100;
+        let mut total_pages = 0;
+
+        if verbose {
+            println!(
+                "Starting paginated query for all items in group {}",
+                group_id
+            );
+        }
+
+        loop {
+            total_pages += 1;
+
+            // Build the query with proper cursor handling
+            let query = if let Some(cursor_str) = &cursor {
+                format!(
+                    r#"
+                    {{
+                        boards(ids: ["{}"]) {{
+                            groups(ids: ["{}"]) {{
+                                items_page(limit: {}, cursor: "{}") {{
+                                    cursor
+                                    items {{
+                                        id
+                                        name
+                                        column_values {{
+                                            id
+                                            value
+                                            text
+                                        }}
+                                    }}
+                                }}
+                            }}
+                        }}
+                    }}
+                    "#,
+                    board_id, group_id, page_size, cursor_str
+                )
+            } else {
+                format!(
+                    r#"
+                    {{
+                        boards(ids: ["{}"]) {{
+                            groups(ids: ["{}"]) {{
+                                items_page(limit: {}) {{
+                                    cursor
+                                    items {{
+                                        id
+                                        name
+                                        column_values {{
+                                            id
+                                            value
+                                            text
+                                        }}
+                                    }}
+                                }}
+                            }}
+                        }}
+                    }}
+                    "#,
+                    board_id, group_id, page_size
+                )
+            };
+
+            if verbose {
                 println!(
-                    "Successfully extracted {} items from page",
-                    page_items.len()
+                    "Sending paginated query (page {}, cursor: {:?})",
+                    total_pages, cursor
                 );
             }
 
-            all_items.append(&mut page_items);
+            let request_body = MondayRequest { query };
+            let response = self.send_request(request_body, verbose).await?;
 
-            // Check if we have more pages or reached the limit
-            if let Some(data) = value.get("data") {
-                if let Some(boards) = data.get("boards").and_then(|b| b.as_array()) {
-                    for board in boards {
-                        if let Some(groups) = board.get("groups").and_then(|g| g.as_array()) {
-                            for group in groups {
-                                if let Some(items_page) = group.get("items_page") {
-                                    // Check if there's a next page
-                                    if let Some(next_cursor) =
-                                        items_page.get("cursor").and_then(|c| c.as_str())
-                                    {
-                                        if !next_cursor.is_empty() && all_items.len() < limit {
-                                            cursor = Some(next_cursor.to_string());
-                                            continue;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+            // Parse the response
+            let value: Value = serde_json::from_str(&response)
+                .map_err(|e| anyhow!("Failed to parse JSON response: {}", e))?;
+
+            // Extract items and cursor
+            let (page_items, next_cursor) = extract_items_from_response(&value)
+                .map_err(|e| anyhow!("Failed to extract items from response: {}", e))?;
+
+            if verbose {
+                println!("Page {}: Extracted {} items", total_pages, page_items.len());
             }
 
-            break;
+            all_items.extend(page_items);
+
+            // Check if we have more pages or reached the limit
+            if let Some(next_cursor_val) = next_cursor {
+                if !next_cursor_val.is_empty() && all_items.len() < limit {
+                    cursor = Some(next_cursor_val);
+
+                    // Add a small delay to avoid rate limiting
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+
+            // Safety limit
+            if total_pages > 50 {
+                if verbose {
+                    println!("Reached safety limit of 50 pages");
+                }
+                break;
+            }
         }
 
         if verbose {
@@ -764,7 +924,16 @@ fn manually_parse_response(response: &str) -> Result<MondayResponse, anyhow::Err
                         };
 
                         if let Some(items_page_val) = group_val.get("items_page") {
-                            let mut items_page = ItemsPage { items: Vec::new() };
+                            let mut items_page = ItemsPage {
+                                items: Vec::new(),
+                                cursor: None,
+                            };
+
+                            if let Some(cursor_val) =
+                                items_page_val.get("cursor").and_then(|c| c.as_str())
+                            {
+                                items_page.cursor = Some(cursor_val.to_string());
+                            }
 
                             if let Some(items_array) =
                                 items_page_val.get("items").and_then(|i| i.as_array())

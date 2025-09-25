@@ -4,6 +4,7 @@ use anyhow::{anyhow, Result};
 use chrono::prelude::*;
 use serde_json::json;
 use std::io;
+use tokio::time;
 
 pub async fn handle_add_command(
     client: &MondayClient,
@@ -301,7 +302,7 @@ async fn create_items_on_monday(
         }
 
         // Add a small delay to avoid rate limiting
-        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+        time::sleep(time::Duration::from_millis(200)).await;
     }
 
     println!(
@@ -579,7 +580,6 @@ fn prompt_for_claim_details() -> Result<(
     Ok((date, activity_type, customer, work_item, hours, days))
 }
 
-// Move this function inside the add.rs module since it's only used here
 fn validate_date_flexible(date_str: &str) -> Result<()> {
     validate_date(date_str)
 }
