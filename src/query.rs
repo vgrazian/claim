@@ -5,6 +5,11 @@ use crate::{
 };
 use anyhow::Result;
 use chrono::prelude::*;
+use std::io::{self, Write};
+use std::time::Duration;
+use rand::seq::SliceRandom;
+use tokio::sync::mpsc;
+use tokio::task;
 
 pub async fn handle_query_command(
     client: &MondayClient,
@@ -81,6 +86,14 @@ pub async fn handle_query_command(
             }
         }
     }
+
+    // Start the dog walking animation in a separate task
+    let (tx, mut rx) = mpsc::channel(1);
+    let animation_handle = if !verbose && start_date.is_some() && target_days == 1 {
+        Some(task::spawn(show_walking_dog_animation(tx)))
+    } else {
+        None
+    };
 
     // First, get the current year's group ID
     let current_year = get_current_year().to_string();
@@ -184,22 +197,33 @@ pub async fn handle_query_command(
     }
 
     // Then filter by date range if date filter is provided
-    let filtered_items: Vec<Item> = if start_date.is_some() && !date_range.is_empty() {
-        let filtered: Vec<Item> = all_items
+    let (filtered_items, has_exact_matches) = if start_date.is_some() && !date_range.is_empty() {
+        let (exact_matches, _non_matching_items): (Vec<Item>, Vec<Item>) = all_items
             .into_iter()
-            .filter(|item| is_item_matching_date_range(item, &date_range))
-            .collect();
+            .partition(|item| is_item_matching_date_range(item, &date_range));
 
-        if verbose {
-            println!("After date range filtering: {} items", filtered.len());
-        }
-        filtered
+        let has_exact = !exact_matches.is_empty();
+        (exact_matches, has_exact)
     } else {
-        all_items
+        (all_items, true) // If no date filter, consider all items as "matching"
     };
 
     let limited_items: Vec<Item> = filtered_items.iter().take(limit).cloned().collect();
     let filtered_items_len = filtered_items.len();
+
+    // Stop the animation if it's running
+    if let Some(handle) = animation_handle {
+        let _ = rx.try_recv(); // Clear any pending messages
+        drop(rx); // This will cause the animation task to exit
+        
+        // Wait for the animation task to finish
+        let _ = handle.await;
+        
+        // Clear the animation line
+        print!("\r{}", " ".repeat(50));
+        print!("\r");
+        io::stdout().flush().unwrap();
+    }
 
     // Display warning if applicable
     if let Some(warning) = warning_message {
@@ -211,7 +235,7 @@ pub async fn handle_query_command(
         if let Some(_start_date_val) = start_date {
             if target_days > 1 {
                 // Multi-day query - show simplified table
-                display_simplified_table(&filtered_items, &date_range, &user.name, verbose);
+                display_simplified_table(&filtered_items, &date_range, &user.name, verbose, has_exact_matches);
             } else {
                 // Single day query - show detailed format
                 display_detailed_items(
@@ -220,11 +244,12 @@ pub async fn handle_query_command(
                     &user.name,
                     filtered_items_len,
                     limit,
+                    has_exact_matches,
                 );
             }
         } else {
             // No date filter - show detailed format
-            display_detailed_items(&limited_items, None, &user.name, filtered_items_len, limit);
+            display_detailed_items(&limited_items, None, &user.name, filtered_items_len, limit, true);
         }
     } else {
         println!("\nNo items found for user '{}'", user.name);
@@ -256,31 +281,126 @@ pub async fn handle_query_command(
         }
     }
 
-    if let Some(_start_date_val) = start_date {
+    // Show appropriate final message based on whether we found exact matches
+    if let Some(query_date) = start_date {
         if target_days > 1 {
             let end_date = date_range
                 .last()
                 .map(|d| d.format("%Y-%m-%d").to_string())
                 .unwrap_or_default();
-            println!(
-                "\n✅ Found {} total items matching date range: {} to {}",
-                filtered_items_len,
-                _start_date_val.format("%Y-%m-%d"),
-                end_date
-            );
+            
+            if has_exact_matches {
+                println!(
+                    "\n✅ Found {} total items matching date range: {} to {}",
+                    filtered_items_len,
+                    query_date.format("%Y-%m-%d"),
+                    end_date
+                );
+            } else if filtered_items_len > 0 {
+                // Find the actual dates we found
+                let found_dates: Vec<String> = filtered_items
+                    .iter()
+                    .filter_map(|item| extract_item_date(item))
+                    .collect();
+                
+                let unique_dates: Vec<&str> = found_dates.iter().map(|s| s.as_str()).collect();
+                println!(
+                    "\n⚠️  No exact matches found for date range: {} to {}. Showing {} items from dates: {:?}",
+                    query_date.format("%Y-%m-%d"),
+                    end_date,
+                    filtered_items_len,
+                    unique_dates
+                );
+            } else {
+                println!(
+                    "\n❌ No items found for date range: {} to {}",
+                    query_date.format("%Y-%m-%d"),
+                    end_date
+                );
+            }
         } else {
-            println!(
-                "\n✅ Found {} total items matching date filter: {}",
-                filtered_items_len,
-                _start_date_val.format("%Y-%m-%d")
-            );
+            if has_exact_matches {
+                println!(
+                    "\n✅ Found {} total items matching date filter: {}",
+                    filtered_items_len,
+                    query_date.format("%Y-%m-%d")
+                );
+            } else if filtered_items_len > 0 {
+                // Find the actual dates we found
+                let found_dates: Vec<String> = filtered_items
+                    .iter()
+                    .filter_map(|item| extract_item_date(item))
+                    .collect();
+                
+                let unique_dates: Vec<&str> = found_dates.iter().map(|s| s.as_str()).collect();
+                println!(
+                    "\n⚠️  No exact matches found for date: {}. Showing {} items from dates: {:?}",
+                    query_date.format("%Y-%m-%d"),
+                    filtered_items_len,
+                    unique_dates
+                );
+            } else {
+                println!(
+                    "\n❌ No items found for date: {}",
+                    query_date.format("%Y-%m-%d")
+                );
+            }
         }
     }
 
     Ok(())
 }
 
-// Rest of the file remains the same...
+// Fun walking dog animation - runs until stopped
+async fn show_walking_dog_animation(tx: mpsc::Sender<()>) {
+    let dog_messages = [
+        "This might take a moment... perfect time to take the dog for a walk! 🐕",
+        "Searching through claims... why not walk the dog while you wait? 🦮",
+        "Fetching your data... the dog could use some fresh air! 🐩",
+    ];
+
+    // Choose a random message (create RNG inside the function to avoid Send issues)
+    let message = {
+        let mut rng = rand::thread_rng();
+        dog_messages.choose(&mut rng).unwrap_or(&dog_messages[0])
+    };
+
+    println!("\n{}", message);
+    
+    let dog_frames = [
+        "🐕‍🦺       ",
+        " 🐕‍🦺      ",
+        "  🐕‍🦺     ",
+        "   🐕‍🦺    ",
+        "    🐕‍🦺   ",
+        "     🐕‍🦺  ",
+        "      🐕‍🦺 ",
+        "       🐕‍🦺",
+        "      🐕‍🦺 ",
+        "     🐕‍🦺  ",
+        "    🐕‍🦺   ",
+        "   🐕‍🦺    ",
+        "  🐕‍🦺     ",
+        " 🐕‍🦺      ",
+    ];
+
+    let mut frame_index = 0;
+    
+    // Keep animating until the channel is closed (which happens when the main task completes)
+    while tx.try_send(()).is_ok() {
+        print!("\rSearching {}", dog_frames[frame_index % dog_frames.len()]);
+        io::stdout().flush().unwrap();
+        
+        frame_index += 1;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    
+    // Animation stopped - clear the line
+    print!("\r{}", " ".repeat(30));
+    print!("\r");
+    io::stdout().flush().unwrap();
+}
+
 // Helper function to get year group ID
 fn get_year_group_id(board: &Board, year: &str) -> String {
     if let Some(groups) = &board.groups {
@@ -355,19 +475,29 @@ fn is_user_item(item: &Item, user_id: i64, user_name: &str, user_email: &str) ->
     false
 }
 
-// Helper function to check if an item matches the specified date
+// Fixed: Strict date matching function
 fn is_item_matching_date(item: &Item, target_date: &str) -> bool {
     for col in &item.column_values {
         if let Some(col_id) = &col.id {
             if col_id == "date4" {
-                // Parse the date column value to check if it matches the target date
+                // Parse the date column value to check if it matches the target date exactly
                 if let Some(value) = &col.value {
                     if let Ok(parsed_value) = serde_json::from_str::<serde_json::Value>(value) {
                         if let Some(date_obj) = parsed_value.get("date") {
                             if let Some(date_str) = date_obj.as_str() {
-                                // Compare the date part only (ignore time if present)
-                                if date_str.starts_with(target_date) {
+                                // Compare the date part exactly (YYYY-MM-DD)
+                                if date_str == target_date {
                                     return true;
+                                }
+                                // Also check if it starts with the target date (in case of datetime strings)
+                                if date_str.starts_with(target_date) {
+                                    // But only if it's exactly the date part (not a partial match)
+                                    if date_str.len() >= target_date.len() {
+                                        let date_part = &date_str[..target_date.len()];
+                                        if date_part == target_date {
+                                            return true;
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -375,8 +505,16 @@ fn is_item_matching_date(item: &Item, target_date: &str) -> bool {
                 }
                 // Also check the text field as fallback
                 if let Some(text) = &col.text {
-                    if text.starts_with(target_date) {
+                    if text == target_date {
                         return true;
+                    }
+                    if text.starts_with(target_date) {
+                        if text.len() >= target_date.len() {
+                            let date_part = &text[..target_date.len()];
+                            if date_part == target_date {
+                                return true;
+                            }
+                        }
                     }
                 }
             }
@@ -484,6 +622,7 @@ fn display_simplified_table(
     date_range: &[NaiveDate],
     user_name: &str,
     verbose: bool,
+    has_exact_matches: bool,
 ) {
     println!("\n=== CLAIMS SUMMARY for User {} ===", user_name);
 
@@ -498,6 +637,10 @@ fn display_simplified_table(
 
     println!("Date Range: {} to {}", start_date, end_date);
 
+    if !has_exact_matches && !items.is_empty() {
+        println!("💡 Showing items from nearby dates (no exact matches found in range)");
+    }
+
     if verbose {
         println!("Processing {} items across {} dates", items.len(), date_range.len());
     }
@@ -509,16 +652,21 @@ fn display_simplified_table(
     );
     println!("{}", "-".repeat(70));
 
-    // Group items by date using a HashMap
+    // Group items by date using a HashMap with exact date matching
     let mut items_by_date: std::collections::HashMap<String, Vec<&Item>> =
         std::collections::HashMap::new();
 
     for item in items {
-        if let Some(item_date) = extract_item_date(item) {
-            items_by_date
-                .entry(item_date)
-                .or_insert_with(Vec::new)
-                .push(item);
+        if let Some(item_date_str) = extract_item_date(item) {
+            if let Ok(item_date) = chrono::NaiveDate::parse_from_str(&item_date_str, "%Y-%m-%d") {
+                // Only include items that exactly match dates in the range
+                if date_range.contains(&item_date) {
+                    items_by_date
+                        .entry(item_date_str)
+                        .or_insert_with(Vec::new)
+                        .push(item);
+                }
+            }
         }
     }
 
@@ -567,6 +715,24 @@ fn display_simplified_table(
         displayed_items,
         date_range.len()
     );
+    
+    // Show message if we have items but they don't match the exact date range
+    if items.len() > 0 && displayed_items == 0 {
+        // Find the closest future date
+        let mut future_dates: Vec<NaiveDate> = items
+            .iter()
+            .filter_map(|item| extract_item_date(item))
+            .filter_map(|date_str| chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d").ok())
+            .filter(|item_date| *item_date > *date_range.last().unwrap())
+            .collect();
+            
+        future_dates.sort();
+        future_dates.dedup();
+        
+        if let Some(next_date) = future_dates.first() {
+            println!("\n💡 Next available entry: {}", next_date.format("%Y-%m-%d"));
+        }
+    }
 }
 
 // Helper function to display detailed items (original format)
@@ -576,11 +742,34 @@ fn display_detailed_items(
     user_name: &str,
     filtered_items_len: usize,
     limit: usize,
+    has_exact_matches: bool,
 ) {
     println!("\n=== FILTERED ITEMS for User {} ===", user_name);
 
     if let Some(date) = filter_date {
         println!("Date filter: {}", date.format("%Y-%m-%d"));
+        
+        if !has_exact_matches && !items.is_empty() {
+            // Find the next available date after the filter date
+            let mut future_dates: Vec<NaiveDate> = items
+                .iter()
+                .filter_map(|item| extract_item_date(item))
+                .filter_map(|date_str| chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d").ok())
+                .filter(|item_date| *item_date > date)
+                .collect();
+                
+            future_dates.sort();
+            future_dates.dedup();
+            
+            if let Some(next_date) = future_dates.first() {
+                println!("⚠️  No entries found for {}. Next available date: {}", 
+                    date.format("%Y-%m-%d"), next_date.format("%Y-%m-%d"));
+            }
+        }
+    }
+
+    if !has_exact_matches && !items.is_empty() {
+        println!("💡 Showing items from nearby dates:");
     }
 
     println!("Found {} items for user {}:", filtered_items_len, user_name);
@@ -641,7 +830,7 @@ fn display_detailed_items(
     }
 }
 
-// Helper function to extract date from an item
+// Fixed: Improved date extraction function
 pub fn extract_item_date(item: &Item) -> Option<String> {
     for col in &item.column_values {
         if let Some(col_id) = &col.id {
@@ -652,22 +841,15 @@ pub fn extract_item_date(item: &Item) -> Option<String> {
                         if let Ok(parsed_value) = serde_json::from_str::<serde_json::Value>(value) {
                             if let Some(date_obj) = parsed_value.get("date") {
                                 if let Some(date_str) = date_obj.as_str() {
-                                    // Normalize the date format to YYYY-MM-DD
-                                    if let Ok(naive_date) =
-                                        chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
-                                    {
-                                        return Some(naive_date.format("%Y-%m-%d").to_string());
-                                    }
-                                    // Try other common date formats
-                                    if let Ok(naive_date) =
-                                        chrono::NaiveDate::parse_from_str(date_str, "%Y/%m/%d")
-                                    {
-                                        return Some(naive_date.format("%Y-%m-%d").to_string());
-                                    }
-                                    if let Ok(naive_date) =
-                                        chrono::NaiveDate::parse_from_str(date_str, "%Y.%m.%d")
-                                    {
-                                        return Some(naive_date.format("%Y-%m-%d").to_string());
+                                    // Extract just the date part (YYYY-MM-DD)
+                                    if date_str.len() >= 10 {
+                                        let date_part = &date_str[..10];
+                                        // Validate it's a proper date format
+                                        if let Ok(naive_date) = 
+                                            chrono::NaiveDate::parse_from_str(date_part, "%Y-%m-%d") 
+                                        {
+                                            return Some(naive_date.format("%Y-%m-%d").to_string());
+                                        }
                                     }
                                     // Return the original string if parsing fails
                                     return Some(date_str.to_string());
@@ -679,18 +861,12 @@ pub fn extract_item_date(item: &Item) -> Option<String> {
                 // Fallback: try to parse from text field
                 if let Some(text) = &col.text {
                     if !text.is_empty() && text != "null" {
-                        // Normalize the date format
-                        if let Ok(naive_date) = chrono::NaiveDate::parse_from_str(text, "%Y-%m-%d")
-                        {
-                            return Some(naive_date.format("%Y-%m-%d").to_string());
-                        }
-                        if let Ok(naive_date) = chrono::NaiveDate::parse_from_str(text, "%Y/%m/%d")
-                        {
-                            return Some(naive_date.format("%Y-%m-%d").to_string());
-                        }
-                        if let Ok(naive_date) = chrono::NaiveDate::parse_from_str(text, "%Y.%m.%d")
-                        {
-                            return Some(naive_date.format("%Y-%m-%d").to_string());
+                        // Extract just the date part
+                        if text.len() >= 10 {
+                            let date_part = &text[..10];
+                            if let Ok(naive_date) = chrono::NaiveDate::parse_from_str(date_part, "%Y-%m-%d") {
+                                return Some(naive_date.format("%Y-%m-%d").to_string());
+                            }
                         }
                         return Some(text.to_string());
                     }
@@ -725,6 +901,14 @@ mod tests {
         let item = create_test_item_with_date("2025-09-15");
         assert!(is_item_matching_date(&item, "2025-09-15"));
         assert!(!is_item_matching_date(&item, "2025-09-16"));
+        
+        // Test with datetime string
+        let mut item_with_time = Item::default();
+        let mut date_column = ColumnValue::default();
+        date_column.id = Some("date4".to_string());
+        date_column.value = Some(r#"{"date": "2025-09-15T00:00:00Z"}"#.to_string());
+        item_with_time.column_values.push(date_column);
+        assert!(is_item_matching_date(&item_with_time, "2025-09-15"));
     }
 
     #[test]
@@ -762,6 +946,15 @@ mod tests {
     fn test_extract_item_date() {
         let item = create_test_item_with_date("2025-09-15");
         let extracted_date = extract_item_date(&item);
+        assert_eq!(extracted_date, Some("2025-09-15".to_string()));
+        
+        // Test with datetime string
+        let mut item_with_time = Item::default();
+        let mut date_column = ColumnValue::default();
+        date_column.id = Some("date4".to_string());
+        date_column.value = Some(r#"{"date": "2025-09-15T12:30:45Z"}"#.to_string());
+        item_with_time.column_values.push(date_column);
+        let extracted_date = extract_item_date(&item_with_time);
         assert_eq!(extracted_date, Some("2025-09-15".to_string()));
     }
 
@@ -805,8 +998,8 @@ mod tests {
         let empty_date_range: Vec<NaiveDate> = Vec::new();
 
         // These should not panic
-        display_simplified_table(&empty_items, &empty_date_range, "test_user", false);
-        display_detailed_items(&empty_items, None, "test_user", 0, 10);
+        display_simplified_table(&empty_items, &empty_date_range, "test_user", false, true);
+        display_detailed_items(&empty_items, None, "test_user", 0, 10, true);
     }
 
     #[test]
