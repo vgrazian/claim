@@ -8,7 +8,6 @@ use chrono::prelude::*;
 use std::io::{self, Write};
 use std::time::Duration;
 use rand::seq::SliceRandom;
-use tokio::sync::mpsc;
 use tokio::task;
 
 pub async fn handle_query_command(
@@ -87,10 +86,9 @@ pub async fn handle_query_command(
         }
     }
 
-    // Start the dog walking animation in a separate task
-    let (tx, mut rx) = mpsc::channel(1);
+    // Start the dog walking animation in a separate task (only for single-day queries)
     let animation_handle = if !verbose && start_date.is_some() && target_days == 1 {
-        Some(task::spawn(show_walking_dog_animation(tx)))
+        Some(start_walking_dog_animation())
     } else {
         None
     };
@@ -196,6 +194,14 @@ pub async fn handle_query_command(
         println!("\n=== Raw items found across all groups: {} ===", all_items.len());
     }
 
+    // Stop the animation if it's running
+    if let Some(handle) = animation_handle {
+        stop_walking_dog_animation(handle).await;
+    }
+
+    // Store a clone of all_items for later use in the "no entries today" message
+    let all_items_clone = all_items.clone();
+
     // Then filter by date range if date filter is provided
     let (filtered_items, has_exact_matches) = if start_date.is_some() && !date_range.is_empty() {
         let (exact_matches, _non_matching_items): (Vec<Item>, Vec<Item>) = all_items
@@ -210,20 +216,6 @@ pub async fn handle_query_command(
 
     let limited_items: Vec<Item> = filtered_items.iter().take(limit).cloned().collect();
     let filtered_items_len = filtered_items.len();
-
-    // Stop the animation if it's running
-    if let Some(handle) = animation_handle {
-        let _ = rx.try_recv(); // Clear any pending messages
-        drop(rx); // This will cause the animation task to exit
-        
-        // Wait for the animation task to finish
-        let _ = handle.await;
-        
-        // Clear the animation line
-        print!("\r{}", " ".repeat(50));
-        print!("\r");
-        io::stdout().flush().unwrap();
-    }
 
     // Display warning if applicable
     if let Some(warning) = warning_message {
@@ -267,6 +259,48 @@ pub async fn handle_query_command(
                 );
             } else {
                 println!("Date filter: {}", _start_date_val.format("%Y-%m-%d"));
+            }
+        }
+        
+        // Special handling for "no entries today, but entries exist later" case
+        if let Some(query_date) = start_date {
+            if target_days == 1 && filtered_items.is_empty() && !all_items_clone.is_empty() {
+                // Find the next available date after today
+                let future_items: Vec<&Item> = all_items_clone
+                    .iter()
+                    .filter(|item| {
+                        if let Some(item_date_str) = extract_item_date(item) {
+                            if let Ok(item_date) = chrono::NaiveDate::parse_from_str(&item_date_str, "%Y-%m-%d") {
+                                return item_date > query_date;
+                            }
+                        }
+                        false
+                    })
+                    .collect();
+                
+                if !future_items.is_empty() {
+                    // Find the closest future date
+                    let mut future_dates: Vec<NaiveDate> = future_items
+                        .iter()
+                        .filter_map(|item| extract_item_date(item))
+                        .filter_map(|date_str| chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d").ok())
+                        .collect();
+                    
+                    future_dates.sort();
+                    future_dates.dedup();
+                    
+                    if let Some(next_date) = future_dates.first() {
+                        let days_diff = (*next_date - query_date).num_days();
+                        let day_word = if days_diff == 1 { "day" } else { "days" };
+                        println!(
+                            "\n💡 No entries found for {}. The next entry is {} ({} {} later).",
+                            query_date.format("%Y-%m-%d"),
+                            next_date.format("%Y-%m-%d"),
+                            days_diff,
+                            day_word
+                        );
+                    }
+                }
             }
         }
         
@@ -351,54 +385,47 @@ pub async fn handle_query_command(
     Ok(())
 }
 
-// Fun walking dog animation - runs until stopped
-async fn show_walking_dog_animation(tx: mpsc::Sender<()>) {
-    let dog_messages = [
-        "This might take a moment... perfect time to take the dog for a walk! 🐕",
-        "Searching through claims... why not walk the dog while you wait? 🦮",
-        "Fetching your data... the dog could use some fresh air! 🐩",
-    ];
-
-    // Choose a random message (create RNG inside the function to avoid Send issues)
-    let message = {
-        let mut rng = rand::thread_rng();
-        dog_messages.choose(&mut rng).unwrap_or(&dog_messages[0])
-    };
-
-    println!("\n{}", message);
-    
-    let dog_frames = [
-        "🐕‍🦺       ",
-        " 🐕‍🦺      ",
-        "  🐕‍🦺     ",
-        "   🐕‍🦺    ",
-        "    🐕‍🦺   ",
-        "     🐕‍🦺  ",
-        "      🐕‍🦺 ",
-        "       🐕‍🦺",
-        "      🐕‍🦺 ",
-        "     🐕‍🦺  ",
-        "    🐕‍🦺   ",
-        "   🐕‍🦺    ",
-        "  🐕‍🦺     ",
-        " 🐕‍🦺      ",
-    ];
-
-    let mut frame_index = 0;
-    
-    // Keep animating until the channel is closed (which happens when the main task completes)
-    while tx.try_send(()).is_ok() {
-        print!("\rSearching {}", dog_frames[frame_index % dog_frames.len()]);
-        io::stdout().flush().unwrap();
+// Improved walking dog animation - simpler and more reliable
+fn start_walking_dog_animation() -> tokio::task::JoinHandle<()> {
+    task::spawn(async move {
+        let dog_frames = ["🐕‍🦺       ", " 🐕‍🦺      ", "  🐕‍🦺     ", "   🐕‍🦺    ", "    🐕‍🦺   ", "     🐕‍🦺  ", "      🐕‍🦺 ", "       🐕‍🦺", "      🐕‍🦺 ", "     🐕‍🦺  ", "    🐕‍🦺   ", "   🐕‍🦺    ", "  🐕‍🦺     ", " 🐕‍🦺      "];
+        let messages = [
+            "Searching your claims... perfect time to walk the dog! 🐕",
+            "Fetching data... your dog would love some fresh air! 🦮", 
+            "Looking through entries... why not take the dog out? 🐩",
+        ];
         
-        frame_index += 1;
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+        let message = {
+            let mut rng = rand::thread_rng();
+            messages.choose(&mut rng).unwrap_or(&messages[0])
+        };
+        
+        println!("\n{}", message);
+        
+        for i in 0.. {
+            print!("\rPlease wait {}", dog_frames[i % dog_frames.len()]);
+            io::stdout().flush().unwrap();
+            
+            // Check if we should stop (every 100ms)
+            if let Ok(_) = tokio::time::timeout(Duration::from_millis(100), std::future::pending::<()>()).await {
+                break;
+            }
+        }
+        
+        // Clear the animation line
+        print!("\r{}", " ".repeat(50));
+        print!("\r");
+        io::stdout().flush().unwrap();
+    })
+}
+
+// Function to stop the animation
+async fn stop_walking_dog_animation(handle: tokio::task::JoinHandle<()>) {
+    handle.abort();
+    let _ = handle.await; // Wait for it to finish
     
-    // Animation stopped - clear the line
-    print!("\r{}", " ".repeat(30));
-    print!("\r");
-    io::stdout().flush().unwrap();
+    // Small delay to ensure the terminal is cleared
+    tokio::time::sleep(Duration::from_millis(50)).await;
 }
 
 // Helper function to get year group ID
@@ -730,7 +757,10 @@ fn display_simplified_table(
         future_dates.dedup();
         
         if let Some(next_date) = future_dates.first() {
-            println!("\n💡 Next available entry: {}", next_date.format("%Y-%m-%d"));
+            let days_diff = (*next_date - *date_range.last().unwrap()).num_days();
+            let day_word = if days_diff == 1 { "day" } else { "days" };
+            println!("\n💡 Next available entry: {} ({} {} later)", 
+                next_date.format("%Y-%m-%d"), days_diff, day_word);
         }
     }
 }
@@ -762,8 +792,10 @@ fn display_detailed_items(
             future_dates.dedup();
             
             if let Some(next_date) = future_dates.first() {
-                println!("⚠️  No entries found for {}. Next available date: {}", 
-                    date.format("%Y-%m-%d"), next_date.format("%Y-%m-%d"));
+                let days_diff = (*next_date - date).num_days();
+                let day_word = if days_diff == 1 { "day" } else { "days" };
+                println!("⚠️  No entries found for {}. Next available date: {} ({} {} later)", 
+                    date.format("%Y-%m-%d"), next_date.format("%Y-%m-%d"), days_diff, day_word);
             }
         }
     }
@@ -831,7 +863,7 @@ fn display_detailed_items(
 }
 
 // Fixed: Improved date extraction function
-pub fn extract_item_date(item: &Item) -> Option<String> {
+fn extract_item_date(item: &Item) -> Option<String> {
     for col in &item.column_values {
         if let Some(col_id) = &col.id {
             if col_id == "date4" {
