@@ -1,4 +1,4 @@
-use crate::monday::{Item, MondayClient, MondayUser};
+use crate::monday::{Board, Item, MondayClient, MondayUser};
 use crate::{
     calculate_working_dates, map_activity_value_to_name, normalize_date, truncate_string,
     validate_date,
@@ -37,7 +37,7 @@ pub async fn handle_query_command(
     };
 
     if verbose {
-        if let Some(start_date_val) = start_date {
+        if let Some(_start_date_val) = start_date {
             if target_days > 1 {
                 let end_date = date_range
                     .last()
@@ -47,7 +47,7 @@ pub async fn handle_query_command(
                     "Querying board {} for user '{}' with date range: {} to {} ({} working days)...",
                     board_id,
                     user.name,
-                    start_date_val.format("%Y-%m-%d"),
+                    _start_date_val.format("%Y-%m-%d"),
                     end_date,
                     target_days
                 );
@@ -56,7 +56,7 @@ pub async fn handle_query_command(
                     "Querying board {} for user '{}' with date filter: {}...",
                     board_id,
                     user.name,
-                    start_date_val.format("%Y-%m-%d")
+                    _start_date_val.format("%Y-%m-%d")
                 );
             }
         } else {
@@ -64,7 +64,7 @@ pub async fn handle_query_command(
         }
     } else {
         // Show brief info even in non-verbose mode
-        if let Some(start_date_val) = start_date {
+        if let Some(_start_date_val) = start_date {
             if target_days > 1 {
                 let end_date = date_range
                     .last()
@@ -72,12 +72,12 @@ pub async fn handle_query_command(
                     .unwrap_or_default();
                 println!(
                     "Querying date range: {} to {} ({} days)...",
-                    start_date_val.format("%Y-%m-%d"),
+                    _start_date_val.format("%Y-%m-%d"),
                     end_date,
                     target_days
                 );
             } else {
-                println!("Querying date: {}...", start_date_val.format("%Y-%m-%d"));
+                println!("Querying date: {}...", _start_date_val.format("%Y-%m-%d"));
             }
         }
     }
@@ -85,7 +85,7 @@ pub async fn handle_query_command(
     // First, get the current year's group ID
     let current_year = get_current_year().to_string();
     let board = client
-        .query_board_verbose(board_id, &current_year, user.id, 1, verbose)
+        .get_board_with_groups(board_id, verbose)
         .await?;
     
     let group_id = get_year_group_id(&board, &current_year);
@@ -94,54 +94,100 @@ pub async fn handle_query_command(
         println!("Using group ID: {} for year: {}", group_id, current_year);
     }
 
-    // Use the method to query ALL items in the group (this method has working pagination)
-    let items = client
-        .query_all_items_in_group(board_id, &group_id, 5000, verbose)
-        .await?;
+    // Search in current year group first
+    let mut all_items = Vec::new();
+    let mut warning_message = None;
 
     if verbose {
-        println!("\n=== Raw items found in group: {} ===", items.len());
+        println!("Found {} groups on board:", board.groups.as_ref().map_or(0, |g| g.len()));
+        if let Some(groups) = &board.groups {
+            for group in groups {
+                println!("  - {} (ID: {})", group.title, group.id);
+            }
+        }
     }
 
-    // Filter items by user (using both name and email for matching)
-    let user_items: Vec<&Item> = items
-        .iter()
-        .filter(|item| is_user_item(item, user.id, &user.name, &user.email))
-        .collect();
+    // Search in current year group first
+    if let Some(groups) = &board.groups {
+        if let Some(current_group) = groups.iter().find(|g| g.title == current_year) {
+            if verbose {
+                println!("\n🔍 Searching in current year group: {}", current_year);
+            }
 
-    if verbose {
-        println!("After user filtering: {} items", user_items.len());
-        
-        // Show some debug info about what we found
-        if user_items.len() > 0 {
-            println!("Sample of user items found:");
-            for (i, item) in user_items.iter().take(3).enumerate() {
-                if let Some(item_date) = extract_item_date(item) {
-                    println!("  Item {}: Date: {}", i + 1, item_date);
+            let items = client
+                .query_all_items_in_group(board_id, &current_group.id, 5000, verbose)
+                .await?;
+
+            let user_items: Vec<Item> = items
+                .into_iter()
+                .filter(|item| is_user_item(item, user.id, &user.name, &user.email))
+                .collect();
+
+            if !user_items.is_empty() {
+                let user_items_len = user_items.len();
+                all_items.extend(user_items);
+                if verbose {
+                    println!("✅ Found {} items in current year group", user_items_len);
                 }
-                // Show how the user is identified in this item
-                for col in &item.column_values {
-                    if let Some(col_id) = &col.id {
-                        if col_id == "person" {
-                            if let Some(text) = &col.text {
-                                println!("    Person text: {}", text);
-                            }
-                            if let Some(value) = &col.value {
-                                println!("    Person value: {}", value);
-                            }
-                        }
-                    }
+            } else {
+                if verbose {
+                    println!("❌ No items found in current year group");
                 }
             }
         }
     }
 
+    // If no items found in current group, search other groups
+    if all_items.is_empty() {
+        if verbose {
+            println!("\n🔍 No items found in current year, searching all groups...");
+        }
+
+        if let Some(groups) = &board.groups {
+            for group in groups {
+                if group.title != current_year {
+                    if verbose {
+                        println!("  Searching in group: {}", group.title);
+                    }
+
+                    let items = client
+                        .query_all_items_in_group(board_id, &group.id, 5000, verbose)
+                        .await?;
+
+                    let user_items: Vec<Item> = items
+                        .into_iter()
+                        .filter(|item| is_user_item(item, user.id, &user.name, &user.email))
+                        .collect();
+
+                    if !user_items.is_empty() {
+                        let user_items_len = user_items.len();
+                        all_items.extend(user_items);
+                        if verbose {
+                            println!("    Found {} items in group {}", user_items_len, group.title);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Set warning if we found items in other groups but not in current group
+        if !all_items.is_empty() {
+            warning_message = Some(format!(
+                "⚠️  WARNING: No claims found for current year ({}). Showing results from other years.",
+                current_year
+            ));
+        }
+    }
+
+    if verbose {
+        println!("\n=== Raw items found across all groups: {} ===", all_items.len());
+    }
+
     // Then filter by date range if date filter is provided
-    let filtered_items: Vec<&Item> = if start_date.is_some() && !date_range.is_empty() {
-        let filtered: Vec<&Item> = user_items
-            .iter()
+    let filtered_items: Vec<Item> = if start_date.is_some() && !date_range.is_empty() {
+        let filtered: Vec<Item> = all_items
+            .into_iter()
             .filter(|item| is_item_matching_date_range(item, &date_range))
-            .cloned()
             .collect();
 
         if verbose {
@@ -149,15 +195,20 @@ pub async fn handle_query_command(
         }
         filtered
     } else {
-        user_items.iter().cloned().collect()
+        all_items
     };
 
-    let limited_items: Vec<&Item> = filtered_items.iter().take(limit).cloned().collect();
+    let limited_items: Vec<Item> = filtered_items.iter().take(limit).cloned().collect();
     let filtered_items_len = filtered_items.len();
+
+    // Display warning if applicable
+    if let Some(warning) = warning_message {
+        println!("\n{}", warning);
+    }
 
     // Display the results
     if !filtered_items.is_empty() {
-        if let Some(start_date_val) = start_date {
+        if let Some(_start_date_val) = start_date {
             if target_days > 1 {
                 // Multi-day query - show simplified table
                 display_simplified_table(&filtered_items, &date_range, &user.name, verbose);
@@ -177,7 +228,7 @@ pub async fn handle_query_command(
         }
     } else {
         println!("\nNo items found for user '{}'", user.name);
-        if let Some(start_date_val) = start_date {
+        if let Some(_start_date_val) = start_date {
             if target_days > 1 {
                 let end_date = date_range
                     .last()
@@ -185,41 +236,27 @@ pub async fn handle_query_command(
                     .unwrap_or_default();
                 println!(
                     "Date range: {} to {} ({} working days)",
-                    start_date_val.format("%Y-%m-%d"),
+                    _start_date_val.format("%Y-%m-%d"),
                     end_date,
                     target_days
                 );
             } else {
-                println!("Date filter: {}", start_date_val.format("%Y-%m-%d"));
+                println!("Date filter: {}", _start_date_val.format("%Y-%m-%d"));
             }
         }
         
         if verbose {
             println!("\n=== DEBUG INFO ===");
-            println!("Total items in group: {}", items.len());
-            println!("Items for user: {}", user_items.len());
+            println!("Searched across all groups on the board");
             
-            // Check what user identifiers are actually present in the data
-            println!("Checking user identifiers in raw data:");
-            let mut user_identifiers = std::collections::HashSet::new();
-            for item in &items {
-                for col in &item.column_values {
-                    if let Some(col_id) = &col.id {
-                        if col_id == "person" {
-                            if let Some(text) = &col.text {
-                                if !text.is_empty() && text != "null" {
-                                    user_identifiers.insert(text.clone());
-                                }
-                            }
-                        }
-                    }
-                }
+            // Check what groups are available
+            if let Some(groups) = &board.groups {
+                println!("Available groups: {:?}", groups.iter().map(|g| &g.title).collect::<Vec<_>>());
             }
-            println!("Found user identifiers: {:?}", user_identifiers);
         }
     }
 
-    if let Some(start_date_val) = start_date {
+    if let Some(_start_date_val) = start_date {
         if target_days > 1 {
             let end_date = date_range
                 .last()
@@ -228,14 +265,14 @@ pub async fn handle_query_command(
             println!(
                 "\n✅ Found {} total items matching date range: {} to {}",
                 filtered_items_len,
-                start_date_val.format("%Y-%m-%d"),
+                _start_date_val.format("%Y-%m-%d"),
                 end_date
             );
         } else {
             println!(
                 "\n✅ Found {} total items matching date filter: {}",
                 filtered_items_len,
-                start_date_val.format("%Y-%m-%d")
+                _start_date_val.format("%Y-%m-%d")
             );
         }
     }
@@ -243,8 +280,9 @@ pub async fn handle_query_command(
     Ok(())
 }
 
+// Rest of the file remains the same...
 // Helper function to get year group ID
-fn get_year_group_id(board: &crate::monday::Board, year: &str) -> String {
+fn get_year_group_id(board: &Board, year: &str) -> String {
     if let Some(groups) = &board.groups {
         for group in groups {
             if group.title == year {
@@ -317,7 +355,6 @@ fn is_user_item(item: &Item, user_id: i64, user_name: &str, user_email: &str) ->
     false
 }
 
-// Rest of the functions remain the same...
 // Helper function to check if an item matches the specified date
 fn is_item_matching_date(item: &Item, target_date: &str) -> bool {
     for col in &item.column_values {
@@ -443,7 +480,7 @@ fn extract_status_value(item: &Item) -> String {
 
 // Display simplified table for multi-day queries
 fn display_simplified_table(
-    items: &[&Item],
+    items: &[Item],
     date_range: &[NaiveDate],
     user_name: &str,
     verbose: bool,
@@ -534,7 +571,7 @@ fn display_simplified_table(
 
 // Helper function to display detailed items (original format)
 fn display_detailed_items(
-    items: &[&Item],
+    items: &[Item],
     filter_date: Option<NaiveDate>,
     user_name: &str,
     filtered_items_len: usize,
@@ -764,7 +801,7 @@ mod tests {
     #[test]
     fn test_display_functions_do_not_panic() {
         // Test that display functions don't panic with empty data
-        let empty_items: Vec<&Item> = Vec::new();
+        let empty_items: Vec<Item> = Vec::new();
         let empty_date_range: Vec<NaiveDate> = Vec::new();
 
         // These should not panic
@@ -776,13 +813,11 @@ mod tests {
     fn test_date_filtering_edge_cases() {
         // Test with empty items
         let empty_items: Vec<Item> = Vec::new();
-        let items_refs: Vec<&Item> = empty_items.iter().collect();
         let date_range = vec![NaiveDate::from_ymd_opt(2025, 9, 15).unwrap()];
 
-        let filtered: Vec<&Item> = items_refs
-            .iter()
+        let filtered: Vec<Item> = empty_items
+            .into_iter()
             .filter(|item| is_item_matching_date_range(item, &date_range))
-            .cloned()
             .collect();
 
         assert_eq!(filtered.len(), 0);

@@ -591,7 +591,7 @@ mod tests {
 
     #[test]
     fn test_get_year_group_id() {
-        let mut board = Board {
+        let board = Board {
             id: "test_board".to_string(),
             name: "Test Board".to_string(),
             groups: Some(vec![

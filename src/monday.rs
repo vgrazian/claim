@@ -495,6 +495,63 @@ impl MondayClient {
         Ok(result_board)
     }
 
+    // NEW METHOD: Get board with all groups (without items)
+    pub async fn get_board_with_groups(&self, board_id: &str, verbose: bool) -> Result<Board> {
+        let query = format!(
+            r#"
+        {{
+            boards(ids: ["{}"]) {{
+                id
+                name
+                groups {{
+                    id
+                    title
+                }}
+            }}
+        }}
+        "#,
+            board_id
+        );
+
+        if verbose {
+            println!("Sending board groups query:\n{}", query);
+        }
+
+        let request_body = MondayRequest { query };
+        let response = self.send_request(request_body, verbose).await?;
+
+        if verbose {
+            println!(
+                "Board groups response: {}",
+                &response[..500.min(response.len())]
+            );
+        }
+
+        let monday_response: MondayResponse = serde_json::from_str(&response)
+            .map_err(|e| anyhow!("Failed to parse board groups response: {}", e))?;
+
+        // Check for API errors
+        if !monday_response.errors.is_empty() {
+            let error_messages: Vec<String> = monday_response
+                .errors
+                .iter()
+                .map(|e| format!("{} (code: {})", e.message, e.error_code))
+                .collect();
+            return Err(anyhow!(
+                "Monday.com API errors: {}",
+                error_messages.join(", ")
+            ));
+        }
+
+        let board = monday_response
+            .data
+            .and_then(|data| data.boards)
+            .and_then(|mut boards| boards.pop())
+            .ok_or_else(|| anyhow!("No board found with ID {}", board_id))?;
+
+        Ok(board)
+    }
+
     pub async fn create_item(
         &self,
         board_id: &str,

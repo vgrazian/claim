@@ -1,9 +1,7 @@
 use anyhow::{anyhow, Result};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::io;
-use std::path::PathBuf;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
@@ -15,7 +13,7 @@ impl Config {
         Config { api_key }
     }
 
-    pub fn get_config_path() -> Option<PathBuf> {
+    pub fn get_config_path() -> Option<std::path::PathBuf> {
         ProjectDirs::from("com", "yourname", "claim")
             .map(|proj_dirs| proj_dirs.config_dir().join("config.json"))
     }
@@ -28,7 +26,7 @@ impl Config {
             return Err(anyhow!("Config file does not exist"));
         }
 
-        let config_data = fs::read_to_string(&config_path)
+        let config_data = std::fs::read_to_string(&config_path)
             .map_err(|e| anyhow!("Failed to read config file: {}", e))?;
 
         let config: Config = serde_json::from_str(&config_data)
@@ -42,14 +40,14 @@ impl Config {
             .ok_or_else(|| anyhow!("Could not determine config directory"))?;
 
         if let Some(parent) = config_path.parent() {
-            fs::create_dir_all(parent)
+            std::fs::create_dir_all(parent)
                 .map_err(|e| anyhow!("Failed to create config directory: {}", e))?;
         }
 
         let config_data = serde_json::to_string_pretty(self)
             .map_err(|e| anyhow!("Failed to serialize config: {}", e))?;
 
-        fs::write(&config_path, config_data)
+        std::fs::write(&config_path, config_data)
             .map_err(|e| anyhow!("Failed to write config file: {}", e))?;
 
         Ok(())
@@ -74,8 +72,8 @@ impl Config {
             return Err(anyhow!("Config file does not exist"));
         }
 
-        let config_data =
-            fs::read_to_string(path).map_err(|e| anyhow!("Failed to read config file: {}", e))?;
+        let config_data = std::fs::read_to_string(path)
+            .map_err(|e| anyhow!("Failed to read config file: {}", e))?;
 
         let config: Config = serde_json::from_str(&config_data)
             .map_err(|e| anyhow!("Failed to parse config: {}", e))?;
@@ -86,14 +84,15 @@ impl Config {
     #[cfg(test)]
     pub fn save_to_path(&self, path: &std::path::Path) -> Result<()> {
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
+            std::fs::create_dir_all(parent)
                 .map_err(|e| anyhow!("Failed to create config directory: {}", e))?;
         }
 
         let config_data = serde_json::to_string_pretty(self)
             .map_err(|e| anyhow!("Failed to serialize config: {}", e))?;
 
-        fs::write(path, config_data).map_err(|e| anyhow!("Failed to write config file: {}", e))?;
+        std::fs::write(path, config_data)
+            .map_err(|e| anyhow!("Failed to write config file: {}", e))?;
 
         Ok(())
     }
@@ -103,7 +102,6 @@ impl Config {
 mod tests {
     use super::*;
     use std::env;
-    use std::fs;
     use tempfile::TempDir;
 
     fn setup_test_env() -> TempDir {

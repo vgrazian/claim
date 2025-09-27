@@ -5,10 +5,10 @@ mod query;
 mod utils;
 
 use anyhow::{anyhow, Result};
-use chrono::prelude::*;
+use chrono::Datelike;
 use clap::{Parser, Subcommand};
 use config::Config;
-use monday::{MondayClient, MondayUser};
+use monday::MondayClient;
 use std::process;
 
 #[derive(Parser)]
@@ -193,12 +193,6 @@ pub use utils::{
     normalize_date, truncate_string, validate_date,
 };
 
-// Import the functions that are used in main but defined in other modules
-use crate::add::handle_add_command;
-
-// Remove the old query_board function and other helper functions that are now in separate modules
-// Keep only the essential functions that are used by both add and query modules
-
 // Helper function to get year group ID (used by add module)
 fn get_year_group_id(board: &monday::Board, year: &str) -> String {
     if let Some(groups) = &board.groups {
@@ -380,10 +374,6 @@ fn prompt_for_claim_details() -> Result<(
 fn validate_date_flexible(date_str: &str) -> Result<()> {
     validate_date(date_str)
 }
-
-// Remove all the query-related helper functions that are now in query.rs
-// Remove: is_item_matching_date, is_item_matching_date_range, extract_item_date,
-// extract_column_value, extract_status_value, display_simplified_table, display_detailed_items
 
 // Keep only the functions needed for the add functionality
 async fn create_items_on_monday(
