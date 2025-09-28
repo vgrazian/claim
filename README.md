@@ -208,29 +208,7 @@ claim delete --delete-id ID
 ```
 
 **Options:**
-- `-x, --delete-id ID`: **Required** Item ID to delete 
-f
-i
-n
-d
-t
-h
-i
-s
-i
-n
-q
-u
-e
-r
-y
-o
-u
-t
-p
-u
-t
-findthisinqueryoutput
+- `-x, --delete-id ID`: **Required** Item ID to delete (find in your query output the correct ID)
 - `-y, --yes`: Skip confirmation prompt
 - `-v, --verbose`: Verbose output
 
@@ -251,49 +229,12 @@ claim delete -x 9971372083 -v
 Running for user id 51921473, user name Valerio Graziani, email valerio.graziani@it.ibm.com for year 2025
 
 === Delete Claim Item ===
-User: Valerio Graziani 
-v
-a
-l
-e
-r
-i
-o
-g
-˙
-r
-a
-z
-i
-a
-n
-i
-@
-i
-t
-i
-˙
-b
-m
-c
-˙
-o
-m
-valerio 
-g
-˙
-​
- raziani@it 
-i
-˙
- bm 
-c
-˙
- om
+User: Jon Doe 
+
 Item ID to delete: 9971372083
 
 📋 Item Details:
-Name: Valerio Graziani
+Name: John Doe
 ID: 9971372083
 Columns:
 Date: 2025-09-29
@@ -329,21 +270,7 @@ claim query -D 2025-09-15
 
 **Query multiple days with weekend skipping:**
 ```bash
-claim query -D 2025-09-15 -d 7 # Will show 5 business days 
-s
-k
-i
-p
-s
-w
-e
-e
-k
-e
-n
-d
-s
-skipsweekends
+claim query -D 2025-09-15 -d 7 # Will show 5 business days skipsweekends
 ```
 
 **Query with custom limit and verbose output:**
