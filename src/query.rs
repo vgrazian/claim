@@ -387,31 +387,54 @@ pub async fn handle_query_command(
                 );
             }
         } else {
+            // SINGLE DAY QUERY - This is the key fix
             if has_exact_matches {
                 println!(
                     "\n✅ Found {} total items matching date filter: {}",
                     filtered_items_len,
                     query_date.format("%Y-%m-%d")
                 );
-            } else if filtered_items_len > 0 {
-                // Find the actual dates we found
-                let found_dates: Vec<String> = filtered_items
-                    .iter()
-                    .filter_map(|item| extract_item_date(item))
-                    .collect();
-                
-                let unique_dates: Vec<&str> = found_dates.iter().map(|s| s.as_str()).collect();
-                println!(
-                    "\n⚠️  No exact matches found for date: {}. Showing {} closest items from dates: {:?}",
-                    query_date.format("%Y-%m-%d"),
-                    filtered_items_len,
-                    unique_dates
-                );
             } else {
-                println!(
-                    "\n❌ No items found for date: {}",
-                    query_date.format("%Y-%m-%d")
-                );
+                // No exact matches found for the single day
+                if filtered_items_len > 0 {
+                    // Find the actual dates we found
+                    let found_dates: Vec<String> = filtered_items
+                        .iter()
+                        .filter_map(|item| extract_item_date(item))
+                        .collect();
+                    
+                    let unique_dates: Vec<&str> = found_dates.iter().map(|s| s.as_str()).collect();
+                    
+                    // For single day queries, show a more helpful message
+                    if let Some(closest_date) = unique_dates.first() {
+                        if let Ok(closest_naive_date) = chrono::NaiveDate::parse_from_str(closest_date, "%Y-%m-%d") {
+                            let days_diff = (closest_naive_date - query_date).num_days();
+                            let direction = if days_diff > 0 { "later" } else { "earlier" };
+                            let day_word = if days_diff.abs() == 1 { "day" } else { "days" };
+                            
+                            println!(
+                                "\n⚠️  No entries found for {}. Showing closest entry from {} ({} {} {}).",
+                                query_date.format("%Y-%m-%d"),
+                                closest_date,
+                                days_diff.abs(),
+                                day_word,
+                                direction
+                            );
+                        } else {
+                            println!(
+                                "\n⚠️  No exact matches found for date: {}. Showing {} closest items from dates: {:?}",
+                                query_date.format("%Y-%m-%d"),
+                                filtered_items_len,
+                                unique_dates
+                            );
+                        }
+                    }
+                } else {
+                    println!(
+                        "\n❌ No items found for date: {}",
+                        query_date.format("%Y-%m-%d")
+                    );
+                }
             }
         }
     }

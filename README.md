@@ -199,6 +199,208 @@ Creating item for 2025-09-23 (1 of 1)...
    claim add -D 2025-09-23 -c "CUSTOMER_NAME" -w "WI-12344" -H 8
 ```
 
+### delete
+
+Delete a claim item by ID.
+
+```bash
+claim delete --delete-id ID
+```
+
+**Options:**
+- `-x, --delete-id ID`: **Required** Item ID to delete 
+f
+i
+n
+d
+t
+h
+i
+s
+i
+n
+q
+u
+e
+r
+y
+o
+u
+t
+p
+u
+t
+findthisinqueryoutput
+- `-y, --yes`: Skip confirmation prompt
+- `-v, --verbose`: Verbose output
+
+**Examples:**
+```bash
+# Delete with confirmation
+claim delete -x 9971372083
+
+# Delete without confirmation
+claim delete -x 9971372083 -y
+
+# Delete with verbose output
+claim delete -x 9971372083 -v
+```
+
+**Output:**
+```text
+Running for user id 51921473, user name Valerio Graziani, email valerio.graziani@it.ibm.com for year 2025
+
+=== Delete Claim Item ===
+User: Valerio Graziani 
+v
+a
+l
+e
+r
+i
+o
+g
+˙
+r
+a
+z
+i
+a
+n
+i
+@
+i
+t
+i
+˙
+b
+m
+c
+˙
+o
+m
+valerio 
+g
+˙
+​
+ raziani@it 
+i
+˙
+ bm 
+c
+˙
+ om
+Item ID to delete: 9971372083
+
+📋 Item Details:
+Name: Valerio Graziani
+ID: 9971372083
+Columns:
+Date: 2025-09-29
+Status: illness
+Hours: 8
+
+🗑️ Are you sure you want to delete this item?
+This action cannot be undone! 
+y
+/
+N
+y/N
+y
+
+🔄 Deleting item...
+✅ Item deleted successfully!
+```
+
+**Finding Item IDs:**
+To find the ID of an item you want to delete:
+1. Run `claim query` to list your claims
+2. Look for the `ID: **********` value in the output
+3. Use that ID with the delete command
+
+## EXAMPLES
+
+### Query Examples
+
+**Query claims for a specific date:**
+```bash
+claim query -D 2025-09-15
+```
+
+**Query multiple days with weekend skipping:**
+```bash
+claim query -D 2025-09-15 -d 7 # Will show 5 business days 
+s
+k
+i
+p
+s
+w
+e
+e
+k
+e
+n
+d
+s
+skipsweekends
+```
+
+**Query with custom limit and verbose output:**
+```bash
+claim query -D 2025-09-01 -d 10 --limit 15 -v
+```
+
+**Query current week:**
+```bash
+# Assuming today is Monday, query the current work week
+claim query -d 5
+```
+
+### Add Examples
+
+**Add a single claim entry:**
+```bash
+claim add -D 2025-09-23 -c "CUSTOMER_A" -w "PROJ-123" -H 8
+```
+
+**Add multiple days of claims:**
+```bash
+claim add -D 2025-09-23 -c "CUSTOMER_B" -w "TASK-456" -H 6 -d 5
+```
+
+**Add claim with specific activity type:**
+```bash
+claim add -D 2025-09-23 -t vacation -d 3
+```
+
+**Add claim non-interactively:**
+```bash
+claim add -D 2025-09-23 -c "CUSTOMER_C" -w "WI-789" -H 4 -y
+```
+
+**Add claim for today with verbose output:**
+```bash
+claim add -c "CUSTOMER_D" -w "PROJ-999" -H 7 -v
+```
+
+### Delete Examples
+
+**Delete a claim with confirmation:**
+```bash
+claim delete -x 9971372083
+```
+
+**Delete a claim without confirmation:**
+```bash
+claim delete -x 9971372083 -y
+```
+
+**Delete with verbose output to see details:**
+```bash
+claim delete -x 9971372083 -v
+```
+
 ## EXAMPLES
 
 ### Query Examples
@@ -249,6 +451,23 @@ claim add -D 2025-09-23 -c "CUSTOMER_C" -w "WI-789" -H 4 -y
 **Add claim for today with verbose output:**
 ```bash
 claim add -c "CUSTOMER_D" -w "PROJ-999" -H 7 -v
+```
+
+### Delete Examples
+
+**Delete a claim with confirmation:**
+```bash
+claim delete -x 9971372083
+```
+
+**Delete a claim without confirmation:**
+```bash
+claim delete -x 9971372083 -y
+```
+
+**Delete with verbose output to see details:**
+```bash
+claim delete -x 9971372083 -v
 ```
 
 ## CONFIGURATION FILE LOCATION
