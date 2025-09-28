@@ -19,6 +19,15 @@ struct MondayResponse {
 struct MondayData {
     me: Option<MondayUser>,
     boards: Option<Vec<Board>>,
+    items: Option<Vec<Item>>,
+    #[serde(flatten)]
+    extra_fields: std::collections::HashMap<String, serde_json::Value>,
+}
+
+impl MondayData {
+    fn get_custom_field(&self, field_name: &str) -> Option<&serde_json::Value> {
+        self.extra_fields.get(field_name)
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -893,6 +902,135 @@ impl MondayClient {
         Ok(all_items)
     }
 
+    // NEW METHOD: Get an item by its ID
+    pub async fn get_item_by_id(&self, item_id: &str, verbose: bool) -> Result<Option<Item>> {
+        let query = format!(
+            r#"
+        {{
+            items(ids: ["{}"]) {{
+                id
+                name
+                column_values {{
+                    id
+                    value
+                    text
+                }}
+            }}
+        }}
+        "#,
+            item_id
+        );
+
+        if verbose {
+            println!("Sending get item query:\n{}", query);
+        }
+
+        let request_body = MondayRequest { query };
+        let response = self.send_request(request_body, verbose).await?;
+
+        if verbose {
+            println!(
+                "Get item response: {}",
+                &response[..500.min(response.len())]
+            );
+        }
+
+        let monday_response: MondayResponse = serde_json::from_str(&response)
+            .map_err(|e| anyhow!("Failed to parse get item response: {}", e))?;
+
+        // Check for API errors
+        if !monday_response.errors.is_empty() {
+            let error_messages: Vec<String> = monday_response
+                .errors
+                .iter()
+                .map(|e| format!("{} (code: {})", e.message, e.error_code))
+                .collect();
+            return Err(anyhow!(
+                "Monday.com API errors: {}",
+                error_messages.join(", ")
+            ));
+        }
+
+        // Extract the item from the response
+        if let Some(data) = monday_response.data {
+            // Try to get items from the items field first
+            if let Some(items) = data.items {
+                if !items.is_empty() {
+                    return Ok(Some(items[0].clone()));
+                }
+            }
+
+            // Alternative parsing for nested structures
+            if let Some(boards) = data.boards {
+                for board in boards {
+                    if let Some(groups) = board.groups {
+                        for group in groups {
+                            if let Some(items_page) = group.items_page {
+                                for item in items_page.items {
+                                    if item.id.as_deref() == Some(item_id) {
+                                        return Ok(Some(item));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    // NEW METHOD: Delete an item by its ID
+    pub async fn delete_item(&self, item_id: &str, verbose: bool) -> Result<String> {
+        let query = format!(
+            r#"
+        mutation {{
+            delete_item (item_id: {}) {{
+                id
+            }}
+        }}
+        "#,
+            item_id
+        );
+
+        if verbose {
+            println!("Sending delete item mutation:\n{}", query);
+        }
+
+        let request_body = MondayRequest {
+            query: query.to_string(),
+        };
+
+        let response = self.send_request(request_body, verbose).await?;
+
+        if verbose {
+            println!("Delete item response: {}", response);
+        }
+
+        let monday_response: MondayResponse = serde_json::from_str(&response)
+            .map_err(|e| anyhow!("Failed to parse delete item response: {}", e))?;
+
+        if !monday_response.errors.is_empty() {
+            let error_messages: Vec<String> = monday_response
+                .errors
+                .iter()
+                .map(|e| format!("{} (code: {})", e.message, e.error_code))
+                .collect();
+            return Err(anyhow!(
+                "Monday.com API errors: {}",
+                error_messages.join(", ")
+            ));
+        }
+
+        // Parse the response to get the deleted item ID
+        if monday_response.data.is_some() {
+            Ok(format!("Item {} deleted successfully", item_id))
+        } else {
+            Err(anyhow!("No data returned from delete item mutation"))
+        }
+    }
+
     async fn send_request(&self, request_body: MondayRequest, verbose: bool) -> Result<String> {
         if verbose {
             println!("Sending request to Monday.com API...");
@@ -1059,6 +1197,8 @@ fn manually_parse_response(response: &str) -> Result<MondayResponse, anyhow::Err
         data: Some(MondayData {
             me: None,
             boards: Some(boards),
+            items: None,
+            extra_fields: std::collections::HashMap::new(),
         }),
         errors: Vec::new(),
     })

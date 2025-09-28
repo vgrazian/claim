@@ -204,12 +204,46 @@ pub async fn handle_query_command(
 
     // Then filter by date range if date filter is provided
     let (filtered_items, has_exact_matches) = if start_date.is_some() && !date_range.is_empty() {
-        let (exact_matches, _non_matching_items): (Vec<Item>, Vec<Item>) = all_items
+        let (exact_matches, non_matching_items): (Vec<Item>, Vec<Item>) = all_items
             .into_iter()
             .partition(|item| is_item_matching_date_range(item, &date_range));
 
         let has_exact = !exact_matches.is_empty();
-        (exact_matches, has_exact)
+        
+        // For single-day queries, if no exact matches but we have other items, show the closest ones
+        if target_days == 1 && exact_matches.is_empty() && !non_matching_items.is_empty() {
+            // Find items with dates closest to the target date
+            let mut items_with_dates: Vec<(Item, NaiveDate)> = non_matching_items
+                .into_iter()
+                .filter_map(|item| {
+                    extract_item_date(&item)
+                        .and_then(|date_str| chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d").ok())
+                        .map(|date| (item, date))
+                })
+                .collect();
+            
+            // Sort by proximity to target date
+            if let Some(target_date) = start_date {
+                items_with_dates.sort_by(|a, b| {
+                    let diff_a = (a.1 - target_date).num_days().abs();
+                    let diff_b = (b.1 - target_date).num_days().abs();
+                    diff_a.cmp(&diff_b)
+                });
+                
+                // Take the closest 3 items
+                let closest_items: Vec<Item> = items_with_dates
+                    .into_iter()
+                    .take(3)
+                    .map(|(item, _)| item)
+                    .collect();
+                
+                (closest_items, false)
+            } else {
+                (exact_matches, has_exact)
+            }
+        } else {
+            (exact_matches, has_exact)
+        }
     } else {
         (all_items, true) // If no date filter, consider all items as "matching"
     };
@@ -339,7 +373,7 @@ pub async fn handle_query_command(
                 
                 let unique_dates: Vec<&str> = found_dates.iter().map(|s| s.as_str()).collect();
                 println!(
-                    "\n⚠️  No exact matches found for date range: {} to {}. Showing {} items from dates: {:?}",
+                    "\n⚠️  No exact matches found for date range: {} to {}. Showing {} closest items from dates: {:?}",
                     query_date.format("%Y-%m-%d"),
                     end_date,
                     filtered_items_len,
@@ -368,7 +402,7 @@ pub async fn handle_query_command(
                 
                 let unique_dates: Vec<&str> = found_dates.iter().map(|s| s.as_str()).collect();
                 println!(
-                    "\n⚠️  No exact matches found for date: {}. Showing {} items from dates: {:?}",
+                    "\n⚠️  No exact matches found for date: {}. Showing {} closest items from dates: {:?}",
                     query_date.format("%Y-%m-%d"),
                     filtered_items_len,
                     unique_dates

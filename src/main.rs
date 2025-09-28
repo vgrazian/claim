@@ -1,5 +1,6 @@
 mod add;
 mod config;
+mod delete;
 mod monday;
 mod query;
 mod utils;
@@ -73,6 +74,20 @@ enum Commands {
         #[arg(short = 'v', long)]
         verbose: bool,
     },
+    /// Delete a claim item by ID
+    Delete {
+        /// Item ID to delete
+        #[arg(short = 'x', long)]
+        delete_id: String,
+
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+
+        /// Verbose output
+        #[arg(short = 'v', long)]
+        verbose: bool,
+    },
 }
 
 #[tokio::main]
@@ -93,6 +108,7 @@ async fn run(cli: Cli) -> Result<()> {
     let verbose = match &cli.command {
         Some(Commands::Query { verbose, .. }) => *verbose,
         Some(Commands::Add { verbose, .. }) => *verbose,
+        Some(Commands::Delete { verbose, .. }) => *verbose,
         None => false,
     };
 
@@ -177,6 +193,13 @@ async fn run(cli: Cli) -> Result<()> {
                 verbose,
             )
             .await?;
+        }
+        Some(Commands::Delete {
+            delete_id,
+            yes,
+            verbose,
+        }) => {
+            delete::handle_delete_command(&client, &user, delete_id, yes, verbose).await?;
         }
         None => {
             // Default action when no command is provided
