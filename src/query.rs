@@ -5,9 +5,9 @@ use crate::{
 };
 use anyhow::Result;
 use chrono::prelude::*;
+use rand::seq::SliceRandom;
 use std::io::{self, Write};
 use std::time::Duration;
-use rand::seq::SliceRandom;
 use tokio::task;
 
 pub async fn handle_query_command(
@@ -95,10 +95,8 @@ pub async fn handle_query_command(
 
     // First, get the current year's group ID
     let current_year = get_current_year().to_string();
-    let board = client
-        .get_board_with_groups(board_id, verbose)
-        .await?;
-    
+    let board = client.get_board_with_groups(board_id, verbose).await?;
+
     let group_id = get_year_group_id(&board, &current_year);
 
     if verbose {
@@ -110,7 +108,10 @@ pub async fn handle_query_command(
     let mut warning_message = None;
 
     if verbose {
-        println!("Found {} groups on board:", board.groups.as_ref().map_or(0, |g| g.len()));
+        println!(
+            "Found {} groups on board:",
+            board.groups.as_ref().map_or(0, |g| g.len())
+        );
         if let Some(groups) = &board.groups {
             for group in groups {
                 println!("  - {} (ID: {})", group.title, group.id);
@@ -174,7 +175,10 @@ pub async fn handle_query_command(
                         let user_items_len = user_items.len();
                         all_items.extend(user_items);
                         if verbose {
-                            println!("    Found {} items in group {}", user_items_len, group.title);
+                            println!(
+                                "    Found {} items in group {}",
+                                user_items_len, group.title
+                            );
                         }
                     }
                 }
@@ -191,7 +195,10 @@ pub async fn handle_query_command(
     }
 
     if verbose {
-        println!("\n=== Raw items found across all groups: {} ===", all_items.len());
+        println!(
+            "\n=== Raw items found across all groups: {} ===",
+            all_items.len()
+        );
     }
 
     // Stop the animation if it's running
@@ -209,7 +216,7 @@ pub async fn handle_query_command(
             .partition(|item| is_item_matching_date_range(item, &date_range));
 
         let has_exact = !exact_matches.is_empty();
-        
+
         // For single-day queries, if no exact matches but we have other items, show the closest ones
         if target_days == 1 && exact_matches.is_empty() && !non_matching_items.is_empty() {
             // Find items with dates closest to the target date
@@ -217,11 +224,13 @@ pub async fn handle_query_command(
                 .into_iter()
                 .filter_map(|item| {
                     extract_item_date(&item)
-                        .and_then(|date_str| chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d").ok())
+                        .and_then(|date_str| {
+                            chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d").ok()
+                        })
                         .map(|date| (item, date))
                 })
                 .collect();
-            
+
             // Sort by proximity to target date
             if let Some(target_date) = start_date {
                 items_with_dates.sort_by(|a, b| {
@@ -229,14 +238,14 @@ pub async fn handle_query_command(
                     let diff_b = (b.1 - target_date).num_days().abs();
                     diff_a.cmp(&diff_b)
                 });
-                
+
                 // Take the closest 3 items
                 let closest_items: Vec<Item> = items_with_dates
                     .into_iter()
                     .take(3)
                     .map(|(item, _)| item)
                     .collect();
-                
+
                 (closest_items, false)
             } else {
                 (exact_matches, has_exact)
@@ -261,7 +270,13 @@ pub async fn handle_query_command(
         if let Some(_start_date_val) = start_date {
             if target_days > 1 {
                 // Multi-day query - show simplified table
-                display_simplified_table(&filtered_items, &date_range, &user.name, verbose, has_exact_matches);
+                display_simplified_table(
+                    &filtered_items,
+                    &date_range,
+                    &user.name,
+                    verbose,
+                    has_exact_matches,
+                );
             } else {
                 // Single day query - show detailed format
                 display_detailed_items(
@@ -275,7 +290,14 @@ pub async fn handle_query_command(
             }
         } else {
             // No date filter - show detailed format
-            display_detailed_items(&limited_items, None, &user.name, filtered_items_len, limit, true);
+            display_detailed_items(
+                &limited_items,
+                None,
+                &user.name,
+                filtered_items_len,
+                limit,
+                true,
+            );
         }
     } else {
         println!("\nNo items found for user '{}'", user.name);
@@ -295,7 +317,7 @@ pub async fn handle_query_command(
                 println!("Date filter: {}", _start_date_val.format("%Y-%m-%d"));
             }
         }
-        
+
         // Special handling for "no entries today, but entries exist later" case
         if let Some(query_date) = start_date {
             if target_days == 1 && filtered_items.is_empty() && !all_items_clone.is_empty() {
@@ -304,25 +326,29 @@ pub async fn handle_query_command(
                     .iter()
                     .filter(|item| {
                         if let Some(item_date_str) = extract_item_date(item) {
-                            if let Ok(item_date) = chrono::NaiveDate::parse_from_str(&item_date_str, "%Y-%m-%d") {
+                            if let Ok(item_date) =
+                                chrono::NaiveDate::parse_from_str(&item_date_str, "%Y-%m-%d")
+                            {
                                 return item_date > query_date;
                             }
                         }
                         false
                     })
                     .collect();
-                
+
                 if !future_items.is_empty() {
                     // Find the closest future date
                     let mut future_dates: Vec<NaiveDate> = future_items
                         .iter()
                         .filter_map(|item| extract_item_date(item))
-                        .filter_map(|date_str| chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d").ok())
+                        .filter_map(|date_str| {
+                            chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d").ok()
+                        })
                         .collect();
-                    
+
                     future_dates.sort();
                     future_dates.dedup();
-                    
+
                     if let Some(next_date) = future_dates.first() {
                         let days_diff = (*next_date - query_date).num_days();
                         let day_word = if days_diff == 1 { "day" } else { "days" };
@@ -337,14 +363,17 @@ pub async fn handle_query_command(
                 }
             }
         }
-        
+
         if verbose {
             println!("\n=== DEBUG INFO ===");
             println!("Searched across all groups on the board");
-            
+
             // Check what groups are available
             if let Some(groups) = &board.groups {
-                println!("Available groups: {:?}", groups.iter().map(|g| &g.title).collect::<Vec<_>>());
+                println!(
+                    "Available groups: {:?}",
+                    groups.iter().map(|g| &g.title).collect::<Vec<_>>()
+                );
             }
         }
     }
@@ -356,7 +385,7 @@ pub async fn handle_query_command(
                 .last()
                 .map(|d| d.format("%Y-%m-%d").to_string())
                 .unwrap_or_default();
-            
+
             if has_exact_matches {
                 println!(
                     "\n✅ Found {} total items matching date range: {} to {}",
@@ -370,7 +399,7 @@ pub async fn handle_query_command(
                     .iter()
                     .filter_map(|item| extract_item_date(item))
                     .collect();
-                
+
                 let unique_dates: Vec<&str> = found_dates.iter().map(|s| s.as_str()).collect();
                 println!(
                     "\n⚠️  No exact matches found for date range: {} to {}. Showing {} closest items from dates: {:?}",
@@ -402,16 +431,18 @@ pub async fn handle_query_command(
                         .iter()
                         .filter_map(|item| extract_item_date(item))
                         .collect();
-                    
+
                     let unique_dates: Vec<&str> = found_dates.iter().map(|s| s.as_str()).collect();
-                    
+
                     // For single day queries, show a more helpful message
                     if let Some(closest_date) = unique_dates.first() {
-                        if let Ok(closest_naive_date) = chrono::NaiveDate::parse_from_str(closest_date, "%Y-%m-%d") {
+                        if let Ok(closest_naive_date) =
+                            chrono::NaiveDate::parse_from_str(closest_date, "%Y-%m-%d")
+                        {
                             let days_diff = (closest_naive_date - query_date).num_days();
                             let direction = if days_diff > 0 { "later" } else { "earlier" };
                             let day_word = if days_diff.abs() == 1 { "day" } else { "days" };
-                            
+
                             println!(
                                 "\n⚠️  No entries found for {}. Showing closest entry from {} ({} {} {}).",
                                 query_date.format("%Y-%m-%d"),
@@ -445,30 +476,47 @@ pub async fn handle_query_command(
 // Improved walking dog animation - simpler and more reliable
 fn start_walking_dog_animation() -> tokio::task::JoinHandle<()> {
     task::spawn(async move {
-        let dog_frames = ["🐕‍🦺       ", " 🐕‍🦺      ", "  🐕‍🦺     ", "   🐕‍🦺    ", "    🐕‍🦺   ", "     🐕‍🦺  ", "      🐕‍🦺 ", "       🐕‍🦺", "      🐕‍🦺 ", "     🐕‍🦺  ", "    🐕‍🦺   ", "   🐕‍🦺    ", "  🐕‍🦺     ", " 🐕‍🦺      "];
+        let dog_frames = [
+            "🐕‍🦺       ",
+            " 🐕‍🦺      ",
+            "  🐕‍🦺     ",
+            "   🐕‍🦺    ",
+            "    🐕‍🦺   ",
+            "     🐕‍🦺  ",
+            "      🐕‍🦺 ",
+            "       🐕‍🦺",
+            "      🐕‍🦺 ",
+            "     🐕‍🦺  ",
+            "    🐕‍🦺   ",
+            "   🐕‍🦺    ",
+            "  🐕‍🦺     ",
+            " 🐕‍🦺      ",
+        ];
         let messages = [
             "Searching your claims... perfect time to walk the dog! 🐕",
-            "Fetching data... your dog would love some fresh air! 🦮", 
+            "Fetching data... your dog would love some fresh air! 🦮",
             "Looking through entries... why not take the dog out? 🐩",
         ];
-        
+
         let message = {
             let mut rng = rand::thread_rng();
             messages.choose(&mut rng).unwrap_or(&messages[0])
         };
-        
+
         println!("\n{}", message);
-        
+
         for i in 0.. {
             print!("\rPlease wait {}", dog_frames[i % dog_frames.len()]);
             io::stdout().flush().unwrap();
-            
+
             // Check if we should stop (every 100ms)
-            if let Ok(_) = tokio::time::timeout(Duration::from_millis(100), std::future::pending::<()>()).await {
+            if let Ok(_) =
+                tokio::time::timeout(Duration::from_millis(100), std::future::pending::<()>()).await
+            {
                 break;
             }
         }
-        
+
         // Clear the animation line
         print!("\r{}", " ".repeat(50));
         print!("\r");
@@ -480,7 +528,7 @@ fn start_walking_dog_animation() -> tokio::task::JoinHandle<()> {
 async fn stop_walking_dog_animation(handle: tokio::task::JoinHandle<()>) {
     handle.abort();
     let _ = handle.await; // Wait for it to finish
-    
+
     // Small delay to ensure the terminal is cleared
     tokio::time::sleep(Duration::from_millis(50)).await;
 }
@@ -511,7 +559,9 @@ fn is_user_item(item: &Item, user_id: i64, user_name: &str, user_email: &str) ->
                             if let Some(persons_array) = persons.as_array() {
                                 for person in persons_array {
                                     // Check by user ID
-                                    if let Some(person_id) = person.get("id").and_then(|id| id.as_i64()) {
+                                    if let Some(person_id) =
+                                        person.get("id").and_then(|id| id.as_i64())
+                                    {
                                         if person_id == user_id {
                                             return true;
                                         }
@@ -521,7 +571,7 @@ fn is_user_item(item: &Item, user_id: i64, user_name: &str, user_email: &str) ->
                         }
                     }
                 }
-                
+
                 // Method 2: Check by user name or email in the text field
                 if let Some(text) = &col.text {
                     if !text.is_empty() && text != "null" {
@@ -529,15 +579,30 @@ fn is_user_item(item: &Item, user_id: i64, user_name: &str, user_email: &str) ->
                         if text.contains(user_name) {
                             return true;
                         }
-                        
-                        // Check if text contains user email (or part of it)
-                        if text.contains(&user_email) || 
-                           text.contains("valerio.graziani") || // partial email match
-                           text.contains("graziani@") { // common email pattern
+
+                        // Check if text contains user email (or variations)
+                        if text.contains(user_email) {
                             return true;
                         }
-                        
-                        // Also check for common variations
+
+                        // Check for email variations (username part only)
+                        if let Some(at_pos) = user_email.find('@') {
+                            let username_part = &user_email[..at_pos];
+                            if text.contains(username_part) {
+                                return true;
+                            }
+
+                            // Check for domain part variations
+                            let domain_part = &user_email[at_pos + 1..];
+                            if let Some(dot_pos) = domain_part.find('.') {
+                                let domain_name = &domain_part[..dot_pos];
+                                if text.contains(domain_name) {
+                                    return true;
+                                }
+                            }
+                        }
+
+                        // Also check for common variations of the name
                         if user_name.contains(" ") {
                             let parts: Vec<&str> = user_name.split(' ').collect();
                             if parts.len() >= 2 {
@@ -547,6 +612,14 @@ fn is_user_item(item: &Item, user_id: i64, user_name: &str, user_email: &str) ->
                                 }
                                 // Check for "Last, First" format
                                 if text.contains(&format!("{}, {}", parts[1], parts[0])) {
+                                    return true;
+                                }
+                                // Check for just first name
+                                if text.contains(parts[0]) {
+                                    return true;
+                                }
+                                // Check for just last name
+                                if text.contains(parts[1]) {
                                     return true;
                                 }
                             }
@@ -652,7 +725,9 @@ fn extract_column_value(item: &Item, column_id: &str) -> String {
                             if let Some(persons) = parsed_value.get("personsAndTeams") {
                                 if let Some(persons_array) = persons.as_array() {
                                     if let Some(first_person) = persons_array.first() {
-                                        if let Some(name) = first_person.get("name").and_then(|n| n.as_str()) {
+                                        if let Some(name) =
+                                            first_person.get("name").and_then(|n| n.as_str())
+                                        {
                                             return name.to_string();
                                         }
                                     }
@@ -726,7 +801,11 @@ fn display_simplified_table(
     }
 
     if verbose {
-        println!("Processing {} items across {} dates", items.len(), date_range.len());
+        println!(
+            "Processing {} items across {} dates",
+            items.len(),
+            date_range.len()
+        );
     }
 
     // Create a table header with Status column
@@ -799,7 +878,7 @@ fn display_simplified_table(
         displayed_items,
         date_range.len()
     );
-    
+
     // Show message if we have items but they don't match the exact date range
     if items.len() > 0 && displayed_items == 0 {
         // Find the closest future date
@@ -809,15 +888,19 @@ fn display_simplified_table(
             .filter_map(|date_str| chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d").ok())
             .filter(|item_date| *item_date > *date_range.last().unwrap())
             .collect();
-            
+
         future_dates.sort();
         future_dates.dedup();
-        
+
         if let Some(next_date) = future_dates.first() {
             let days_diff = (*next_date - *date_range.last().unwrap()).num_days();
             let day_word = if days_diff == 1 { "day" } else { "days" };
-            println!("\n💡 Next available entry: {} ({} {} later)", 
-                next_date.format("%Y-%m-%d"), days_diff, day_word);
+            println!(
+                "\n💡 Next available entry: {} ({} {} later)",
+                next_date.format("%Y-%m-%d"),
+                days_diff,
+                day_word
+            );
         }
     }
 }
@@ -835,24 +918,31 @@ fn display_detailed_items(
 
     if let Some(date) = filter_date {
         println!("Date filter: {}", date.format("%Y-%m-%d"));
-        
+
         if !has_exact_matches && !items.is_empty() {
             // Find the next available date after the filter date
             let mut future_dates: Vec<NaiveDate> = items
                 .iter()
                 .filter_map(|item| extract_item_date(item))
-                .filter_map(|date_str| chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d").ok())
+                .filter_map(|date_str| {
+                    chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d").ok()
+                })
                 .filter(|item_date| *item_date > date)
                 .collect();
-                
+
             future_dates.sort();
             future_dates.dedup();
-            
+
             if let Some(next_date) = future_dates.first() {
                 let days_diff = (*next_date - date).num_days();
                 let day_word = if days_diff == 1 { "day" } else { "days" };
-                println!("⚠️  No entries found for {}. Next available date: {} ({} {} later)", 
-                    date.format("%Y-%m-%d"), next_date.format("%Y-%m-%d"), days_diff, day_word);
+                println!(
+                    "⚠️  No entries found for {}. Next available date: {} ({} {} later)",
+                    date.format("%Y-%m-%d"),
+                    next_date.format("%Y-%m-%d"),
+                    days_diff,
+                    day_word
+                );
             }
         }
     }
@@ -934,8 +1024,8 @@ fn extract_item_date(item: &Item) -> Option<String> {
                                     if date_str.len() >= 10 {
                                         let date_part = &date_str[..10];
                                         // Validate it's a proper date format
-                                        if let Ok(naive_date) = 
-                                            chrono::NaiveDate::parse_from_str(date_part, "%Y-%m-%d") 
+                                        if let Ok(naive_date) =
+                                            chrono::NaiveDate::parse_from_str(date_part, "%Y-%m-%d")
                                         {
                                             return Some(naive_date.format("%Y-%m-%d").to_string());
                                         }
@@ -953,7 +1043,9 @@ fn extract_item_date(item: &Item) -> Option<String> {
                         // Extract just the date part
                         if text.len() >= 10 {
                             let date_part = &text[..10];
-                            if let Ok(naive_date) = chrono::NaiveDate::parse_from_str(date_part, "%Y-%m-%d") {
+                            if let Ok(naive_date) =
+                                chrono::NaiveDate::parse_from_str(date_part, "%Y-%m-%d")
+                            {
                                 return Some(naive_date.format("%Y-%m-%d").to_string());
                             }
                         }
@@ -990,7 +1082,7 @@ mod tests {
         let item = create_test_item_with_date("2025-09-15");
         assert!(is_item_matching_date(&item, "2025-09-15"));
         assert!(!is_item_matching_date(&item, "2025-09-16"));
-        
+
         // Test with datetime string
         let mut item_with_time = Item::default();
         let mut date_column = ColumnValue::default();
@@ -1036,7 +1128,7 @@ mod tests {
         let item = create_test_item_with_date("2025-09-15");
         let extracted_date = extract_item_date(&item);
         assert_eq!(extracted_date, Some("2025-09-15".to_string()));
-        
+
         // Test with datetime string
         let mut item_with_time = Item::default();
         let mut date_column = ColumnValue::default();

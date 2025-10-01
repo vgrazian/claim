@@ -365,6 +365,11 @@ claim add -D 2025-09-23 -c "CUSTOMER_A" -w "PROJ-123" -H 8
 claim add -D 2025-09-23 -c "CUSTOMER_B" -w "TASK-456" -H 6 -d 5
 ```
 
+**Add multiple days of claims (full week if starting with monday) wthout confirmation:**
+```bash
+claim add -D 2025-09-23 -c "CUSTOMER_B" -w "WI-456" -H 8 -d 5 -y
+```
+
 **Add claim with specific activity type:**
 ```bash
 claim add -D 2025-09-23 -t vacation -d 3
@@ -445,14 +450,10 @@ cd claim
 cargo build --release
 ```
 
-The binary will be available at `target/release/claim`
+The binary will be available at `./target/release/claim`
 
 ## DEVELOPMENT
 
-### Building
-```bash
-cargo build
-```
 
 ### Running Tests
 ```bash
@@ -463,6 +464,7 @@ How to run the functional tests:
 ```bash
 cargo test --test functional_tests
 ```
+NOTE: the last step is manual, you need to get the ID and delete it using the suggested command.
 
 Or run the specific demonstration script
 ```bash
@@ -490,6 +492,7 @@ claim/
 │ ├── config.rs # Configuration management and API key handling
 │ ├── monday.rs # Monday.com API client and data structures
 │ ├── query.rs # All query-related functionality
+│ ├── delete.rs # All delete-related functionality
 │ └── add.rs # All add-related functionality
 ├── Cargo.toml # Project dependencies and metadata
 └── README.md # This file
