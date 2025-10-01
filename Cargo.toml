@@ -16,3 +16,11 @@ rand = "0.8"
 
 [dev-dependencies]
 tempfile = "3.3.0"
+
+[[test]]
+name = "functional_tests"
+path = "tests/functional_tests.rs"
+
+[[test]]
+name = "integration_tests"
+path = "tests/basic_integration.rs"

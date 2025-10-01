@@ -459,6 +459,17 @@ cargo build
 cargo test
 ```
 
+How to run the functional tests:
+```bash
+cargo test --test functional_tests
+```
+
+Or run the specific demonstration script
+```bash
+chmod +x run_functional_tests.sh
+./run_functional_tests.sh
+```
+
 ### Running in Debug Mode
 ```bash
 cargo run
