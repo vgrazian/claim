@@ -16,7 +16,7 @@ pub async fn handle_add_command(
     work_item: Option<String>,
     hours: Option<f64>,
     days: Option<f64>,
-    comment: Option<String>, // NEW: Comment parameter
+    comment: Option<String>,
     yes: bool,
     verbose: bool,
 ) -> Result<()> {
@@ -27,7 +27,7 @@ pub async fn handle_add_command(
         final_work_item,
         final_hours,
         final_days,
-        final_comment, // NEW: Store comment
+        final_comment,
         is_interactive,
     ) = if date.is_none()
         && activity_type.is_none()
@@ -36,14 +36,10 @@ pub async fn handle_add_command(
         && hours.is_none()
         && days.is_none()
         && comment.is_none()
-    // NEW: Check comment in interactive mode
     {
-        // Interactive mode - no parameters provided
         let (d, at, c, wi, h, d_val, cmt) = prompt_for_claim_details()?;
         (d, at, c, wi, h, d_val, cmt, true)
     } else {
-        // Command line mode - use provided parameters
-        // Validate date if provided
         if let Some(ref d) = date {
             validate_date(d)?;
         }
@@ -54,31 +50,25 @@ pub async fn handle_add_command(
             work_item,
             hours,
             days,
-            comment, // NEW: Pass through comment
+            comment,
             false,
         )
     };
 
-    // If date is not provided, default to today's date
     let final_date = if final_date.is_empty() {
         Local::now().format("%Y-%m-%d").to_string()
     } else {
         final_date
     };
 
-    // Process activity type - default to "billable" if not provided
     let activity_type_str = final_activity_type.unwrap_or_else(|| "billable".to_string());
     let activity_type_value = map_activity_type_to_value(&activity_type_str);
-
-    // Process days - default to 1.0 if not provided
     let days_value = final_days.unwrap_or(1.0);
 
-    // Calculate the actual dates (skipping weekends)
     let start_date = chrono::NaiveDate::parse_from_str(&final_date, "%Y-%m-%d")?;
     let target_days = days_value as i64;
     let actual_dates = calculate_working_dates(start_date, target_days);
 
-    // Display the user info and the claim that would be added
     println!("\n=== Adding Claim for User ===");
     println!(
         "User ID: {}, Name: {}, Email: {}",
@@ -112,14 +102,12 @@ pub async fn handle_add_command(
     println!("Days requested: {}", days_value);
     println!("Actual working days: {}", actual_dates.len());
 
-    // Show which dates will be used
     println!("\n📅 Dates that will be created (weekends skipped):");
     for (i, date) in actual_dates.iter().enumerate() {
         let weekday = date.format("%A");
         println!("  {}. {} ({})", i + 1, date.format("%Y-%m-%d"), weekday);
     }
 
-    // Get the current year's group ID from the board
     let board = client
         .query_board_verbose("6500270039", current_year, user.id, 1, verbose)
         .await?;
@@ -135,7 +123,7 @@ pub async fn handle_add_command(
             &activity_type_value,
             &final_customer,
             &final_work_item,
-            &final_comment, // NEW: Include comment
+            &final_comment,
             final_hours,
             user.id,
             &user.name,
@@ -145,7 +133,6 @@ pub async fn handle_add_command(
         println!("\nFound group '{}' with ID: {}", current_year, group_id);
     }
 
-    // Ask for confirmation before proceeding (unless -y flag is used)
     if !yes {
         println!(
             "\n🚀 Ready to create {} item(s) on Monday.com",
@@ -167,14 +154,13 @@ pub async fn handle_add_command(
         );
     }
 
-    // Actually create the items on Monday.com
     create_items_on_monday(
         client,
         &actual_dates,
         activity_type_value,
         &final_customer,
         &final_work_item,
-        &final_comment, // NEW: Include comment
+        &final_comment,
         final_hours,
         user.id,
         &user.name,
@@ -183,14 +169,13 @@ pub async fn handle_add_command(
     )
     .await?;
 
-    // If this was interactive mode, show the equivalent command line
     if is_interactive {
         show_equivalent_command(
             &final_date,
             &activity_type_str,
             &final_customer,
             &final_work_item,
-            &final_comment, // NEW: Include comment
+            &final_comment,
             final_hours,
             days_value,
             yes,
@@ -207,7 +192,7 @@ async fn create_items_on_monday(
     activity_type_value: u8,
     customer: &Option<String>,
     work_item: &Option<String>,
-    comment: &Option<String>, // NEW: Comment parameter
+    comment: &Option<String>,
     hours: Option<f64>,
     user_id: i64,
     user_name: &str,
@@ -258,10 +243,13 @@ async fn create_items_on_monday(
             }
         }
 
-        // NEW: Set comment if provided
+        // FIXED: Set comment using the correct column ID "text2__1"
         if let Some(cmt) = comment {
             if !cmt.is_empty() {
-                column_values["text"] = json!(cmt); // Assuming 'text' column for comments
+                column_values["text2__1"] = json!(cmt);
+                if verbose {
+                    println!("   Setting comment in column 'text2__1': '{}'", cmt);
+                }
             }
         }
 
@@ -345,7 +333,7 @@ fn show_graphql_mutations(
     activity_type_value: &u8,
     customer: &Option<String>,
     work_item: &Option<String>,
-    comment: &Option<String>, // NEW: Comment parameter
+    comment: &Option<String>,
     hours: Option<f64>,
     user_id: i64,
     user_name: &str,
@@ -394,10 +382,10 @@ fn show_graphql_mutations(
             }
         }
 
-        // NEW: Set comment if provided
+        // FIXED: Set comment using the correct column ID "text2__1"
         if let Some(cmt) = comment {
             if !cmt.is_empty() {
-                column_values["text"] = json!(cmt);
+                column_values["text2__1"] = json!(cmt);
             }
         }
 
@@ -449,7 +437,7 @@ fn show_equivalent_command(
     activity_type: &str,
     customer: &Option<String>,
     work_item: &Option<String>,
-    comment: &Option<String>, // NEW: Comment parameter
+    comment: &Option<String>,
     hours: Option<f64>,
     days: f64,
     yes: bool,
@@ -477,7 +465,7 @@ fn show_equivalent_command(
         }
     }
 
-    // NEW: Include comment if provided
+    // Include comment if provided
     if let Some(cmt) = comment {
         if !cmt.is_empty() {
             command_parts.push(format!("--comment \"{}\"", cmt));
@@ -513,7 +501,7 @@ fn prompt_for_claim_details() -> Result<(
     Option<String>,
     Option<f64>,
     Option<f64>,
-    Option<String>, // NEW: Return comment
+    Option<String>,
 )> {
     use std::io::{self, Write};
 
@@ -639,7 +627,7 @@ fn prompt_for_claim_details() -> Result<(
         Some(work_item)
     };
 
-    // NEW: Comment (optional)
+    // Comment (optional)
     print!("Comment (optional): ");
     io::stdout().flush()?;
     let mut comment = String::new();
@@ -698,7 +686,7 @@ fn prompt_for_claim_details() -> Result<(
     ))
 }
 
-// NEW: Helper function to normalize activity type input
+// Helper function to normalize activity type input
 fn normalize_activity_type_input(input: &str) -> String {
     let normalized = input.to_lowercase().replace(' ', "_").replace('-', "_");
 
@@ -720,6 +708,8 @@ fn normalize_activity_type_input(input: &str) -> String {
 fn validate_date_flexible(date_str: &str) -> Result<()> {
     validate_date(date_str)
 }
+
+//  tests ...
 
 #[cfg(test)]
 mod tests {

@@ -764,14 +764,15 @@ fn map_column_title(column_id: &str) -> &str {
         "date4" => "Date",
         "text__1" => "Customer",
         "text8__1" => "Work Item",
+        "text2__1" => "Comment", // FIXED: Map text2__1 to Comment
         "numbers__1" => "Hours",
         "hours" => "Hours",
         "days" => "Days",
         "activity_type" => "Activity Type",
         "customer" => "Customer",
         "work_item" => "Work Item",
-        "text" => "Comment", // NEW: Map text column to Comment
-        _ => column_id,      // Fall back to the ID if no mapping found
+        "text" => "Text",
+        _ => column_id,
     }
 }
 
@@ -798,6 +799,34 @@ fn extract_column_value(item: &Item, column_id: &str) -> String {
                                         }
                                     }
                                 }
+                            }
+                        }
+                        return value.to_string();
+                    }
+                }
+                if let Some(text) = &col.text {
+                    if !text.is_empty() && text != "null" {
+                        return text.to_string();
+                    }
+                }
+            }
+        }
+    }
+    "".to_string()
+}
+
+// NEW: Helper function to extract comment value from the correct column
+fn extract_comment_value(item: &Item) -> String {
+    for col in &item.column_values {
+        if let Some(col_id) = &col.id {
+            // FIXED: Use the correct comment column ID "text2__1"
+            if col_id == "text2__1" {
+                if let Some(value) = &col.value {
+                    if value != "null" && !value.is_empty() {
+                        // Try to parse JSON value for complex columns
+                        if let Ok(parsed_value) = serde_json::from_str::<serde_json::Value>(value) {
+                            if let Some(text) = parsed_value.as_str() {
+                                return text.to_string();
                             }
                         }
                         return value.to_string();
@@ -841,14 +870,14 @@ fn extract_status_value(item: &Item) -> String {
     "unknown".to_string()
 }
 
-// Display simplified table for multi-day queries
+// Display simplified table for multi-day queries - UPDATED to show comments
 fn display_simplified_table(
     items: &[Item],
     date_range: &[NaiveDate],
     user_name: &str,
     verbose: bool,
     has_exact_matches: bool,
-    has_filters: bool, // NEW: Parameter to indicate if filters are active
+    has_filters: bool,
 ) {
     println!("\n=== CLAIMS SUMMARY for User {} ===", user_name);
 
@@ -905,7 +934,6 @@ fn display_simplified_table(
     let mut displayed_items = 0;
     let mut displayed_dates_count = 0;
 
-    // NEW: Determine which dates to display based on whether filters are active
     for date in date_range {
         let date_str = date.format("%Y-%m-%d").to_string();
 
@@ -918,7 +946,7 @@ fn display_simplified_table(
                 let customer = extract_column_value(item, "text__1");
                 let work_item = extract_column_value(item, "text8__1");
                 let hours_str = extract_column_value(item, "numbers__1");
-                let comment = extract_column_value(item, "text"); // NEW: Extract comment
+                let comment = extract_comment_value(item); // FIXED: Extract comment from correct column
                 let hours = hours_str.parse::<f64>().unwrap_or(0.0);
                 total_hours += hours;
 
@@ -929,7 +957,7 @@ fn display_simplified_table(
                     truncate_string(&customer, 18),
                     truncate_string(&work_item, 13),
                     hours_str,
-                    truncate_string(&comment, 18) // NEW: Display comment
+                    truncate_string(&comment, 18)
                 );
             }
         } else if !has_filters {
@@ -948,7 +976,6 @@ fn display_simplified_table(
         "TOTAL", "", "", "", total_hours, ""
     );
 
-    // NEW: Show appropriate count message based on whether filters are active
     if has_filters {
         println!(
             "\nFound {} items matching filters across {} days",
@@ -988,7 +1015,7 @@ fn display_simplified_table(
     }
 }
 
-// Helper function to display detailed items (original format)
+// Helper function to display detailed items (original format) - UPDATED to show comments
 fn display_detailed_items(
     items: &[Item],
     filter_date: Option<NaiveDate>,
@@ -996,8 +1023,8 @@ fn display_detailed_items(
     filtered_items_len: usize,
     limit: usize,
     has_exact_matches: bool,
-    customer_filter: &Option<String>, // NEW: Customer filter for display
-    work_item_filter: &Option<String>, // NEW: Work item filter for display
+    customer_filter: &Option<String>,
+    work_item_filter: &Option<String>,
 ) {
     println!("\n=== FILTERED ITEMS for User {} ===", user_name);
 
@@ -1033,7 +1060,7 @@ fn display_detailed_items(
         }
     }
 
-    // NEW: Show applied filters
+    // Show applied filters
     if customer_filter.is_some() || work_item_filter.is_some() {
         let mut filters = Vec::new();
         if let Some(c) = customer_filter {
@@ -1250,6 +1277,18 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_comment_value() {
+        let mut item = Item::default();
+        let mut comment_column = ColumnValue::default();
+        comment_column.id = Some("text2__1".to_string());
+        comment_column.value = Some("Test comment".to_string());
+        item.column_values.push(comment_column);
+
+        let extracted_comment = extract_comment_value(&item);
+        assert_eq!(extracted_comment, "Test comment");
+    }
+
+    #[test]
     fn test_extract_status_value() {
         let mut item = Item::default();
         let mut status_column = ColumnValue::default();
@@ -1267,7 +1306,8 @@ mod tests {
         assert_eq!(map_column_title("person"), "Person");
         assert_eq!(map_column_title("status"), "Status");
         assert_eq!(map_column_title("text__1"), "Customer");
-        assert_eq!(map_column_title("text"), "Comment"); // NEW: Test comment mapping
+        assert_eq!(map_column_title("text2__1"), "Comment");
+        assert_eq!(map_column_title("text8__1"), "Work Item");
         assert_eq!(map_column_title("unknown"), "unknown");
     }
 
