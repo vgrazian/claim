@@ -232,10 +232,10 @@ claim delete -x 9971372083 -v
 
 **Output:**
 ```text
-Running for user id 51921473, user name Valerio Graziani, email valerio.graziani@it.ibm.com for year 2025
+Running for user id 51921473, user name John Doe, email john.doe@domain.com for year 2025
 
 === Delete Claim Item ===
-User: Jon Doe 
+User: John Doe 
 
 Item ID to delete: 9971372083
 
@@ -276,7 +276,12 @@ claim query -D 2025-09-15
 
 **Query multiple days with weekend skipping:**
 ```bash
-claim query -D 2025-09-15 -d 7 # Will show 5 business days skipsweekends
+claim query -D 2025-09-15 -d 7 # Will show 5 business days skips weekends
+```
+
+**Query to generate a customer or work item specifi report:**
+```bash
+claim query -D 2025-09-15 -c CUST02 -w WI.1002 -d 7 # Will show 5 business days skips weekends
 ```
 
 **Query with custom limit and verbose output:**
@@ -539,18 +544,29 @@ The query command with the `-d` option provides:
 
 The application maps between human-readable activity types and their corresponding numeric values:
 
-| Activity Type    | Value |
-|------------------|-------|
-| vacation         | 0     |
-| billable         | 1     |
-| holding          | 2     |
-| education        | 3     |
-| work_reduction   | 4     |
-| tbd              | 5     |
-| holiday          | 6     |
-| presales         | 7     |
-| illness          | 8     |
-| boh1             | 9     |
-| boh2             | 10    |
-| boh3             | 11    |
+| Activity Type         | Value |
+|-----------------------|-------|
+| vacation              | 0     |
+| billable              | 1     |
+| holding               | 2     |
+| education             | 3     |
+| work_reduction        | 4     |
+| tbd                   | 5     |
+| holiday               | 6     |
+| presales              | 7     |
+| illness               | 8     |
+| paid_not_worked       | 9     |
+| intellectual_capital  | 10    |
+| business_development  | 11    |
+| overhead              | 12    |
 
+Pls be patient, Readme is rarely up to date
+
+As you got down here you can pet Virgilio the cat:
+
+ _._     _,-'""`-._
+(,-.`._,'(       |\`-/|
+    `-.-' \ )-`( , o o)
+          `-    \`_`"'-
+
+purr purrr...
