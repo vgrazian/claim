@@ -563,10 +563,10 @@ The application maps between human-readable activity types and their correspondi
 Pls be patient, Readme is rarely up to date
 
 As you got down here you can pet Virgilio the cat:
-
+~~~ text
  _._     _,-'""`-._
 (,-.`._,'(       |\`-/|
     `-.-' \ )-`( , o o)
           `-    \`_`"'-
-
+~~~
 purr purrr...
