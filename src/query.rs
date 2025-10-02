@@ -546,9 +546,12 @@ fn get_year_group_id(board: &Board, year: &str) -> String {
     "new_group_mkkbbd2q".to_string()
 }
 
-// Improved helper function to check if an item belongs to a user
-// Now checks for both user ID, name, and email
+// Improved helper function to check if an item belongs to a user with debugging
 fn is_user_item(item: &Item, user_id: i64, user_name: &str, user_email: &str) -> bool {
+    let mut found_by_id = false;
+    let mut found_by_name = false;
+    let mut found_by_email = false;
+
     for col in &item.column_values {
         if let Some(col_id) = &col.id {
             if col_id == "person" {
@@ -558,12 +561,12 @@ fn is_user_item(item: &Item, user_id: i64, user_name: &str, user_email: &str) ->
                         if let Some(persons) = parsed_value.get("personsAndTeams") {
                             if let Some(persons_array) = persons.as_array() {
                                 for person in persons_array {
-                                    // Check by user ID
                                     if let Some(person_id) =
                                         person.get("id").and_then(|id| id.as_i64())
                                     {
                                         if person_id == user_id {
-                                            return true;
+                                            found_by_id = true;
+                                            break;
                                         }
                                     }
                                 }
@@ -572,64 +575,25 @@ fn is_user_item(item: &Item, user_id: i64, user_name: &str, user_email: &str) ->
                     }
                 }
 
-                // Method 2: Check by user name or email in the text field
+                // Method 2: Check by exact matching in text field
                 if let Some(text) = &col.text {
                     if !text.is_empty() && text != "null" {
-                        // Check if text contains user name
-                        if text.contains(user_name) {
-                            return true;
-                        }
-
-                        // Check if text contains user email (or variations)
-                        if text.contains(user_email) {
-                            return true;
-                        }
-
-                        // Check for email variations (username part only)
-                        if let Some(at_pos) = user_email.find('@') {
-                            let username_part = &user_email[..at_pos];
-                            if text.contains(username_part) {
-                                return true;
-                            }
-
-                            // Check for domain part variations
-                            let domain_part = &user_email[at_pos + 1..];
-                            if let Some(dot_pos) = domain_part.find('.') {
-                                let domain_name = &domain_part[..dot_pos];
-                                if text.contains(domain_name) {
-                                    return true;
-                                }
-                            }
-                        }
-
-                        // Also check for common variations of the name
-                        if user_name.contains(" ") {
-                            let parts: Vec<&str> = user_name.split(' ').collect();
-                            if parts.len() >= 2 {
-                                // Check for "First Last" format
-                                if text.contains(&format!("{} {}", parts[0], parts[1])) {
-                                    return true;
-                                }
-                                // Check for "Last, First" format
-                                if text.contains(&format!("{}, {}", parts[1], parts[0])) {
-                                    return true;
-                                }
-                                // Check for just first name
-                                if text.contains(parts[0]) {
-                                    return true;
-                                }
-                                // Check for just last name
-                                if text.contains(parts[1]) {
-                                    return true;
-                                }
-                            }
+                        if text == user_name {
+                            found_by_name = true;
+                        } else if text == user_email {
+                            found_by_email = true;
+                        } else if text.contains(&format!("\"name\":\"{}\"", user_name)) {
+                            found_by_name = true;
+                        } else if text.contains(&format!("\"email\":\"{}\"", user_email)) {
+                            found_by_email = true;
                         }
                     }
                 }
             }
         }
     }
-    false
+
+    found_by_id || found_by_name || found_by_email
 }
 
 // Fixed: Strict date matching function
