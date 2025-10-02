@@ -16,6 +16,8 @@ pub async fn handle_query_command(
     limit: usize,
     date: Option<String>,
     days: usize,
+    customer: Option<String>,  // NEW: Customer filter
+    work_item: Option<String>, // NEW: Work item filter
     verbose: bool,
 ) -> Result<()> {
     let board_id = "6500270039";
@@ -66,6 +68,14 @@ pub async fn handle_query_command(
         } else {
             println!("Querying board {} for user '{}'...", board_id, user.name);
         }
+
+        // NEW: Show customer and work item filters if provided
+        if let Some(ref c) = customer {
+            println!("Customer filter: {}", c);
+        }
+        if let Some(ref wi) = work_item {
+            println!("Work item filter: {}", wi);
+        }
     } else {
         // Show brief info even in non-verbose mode
         if let Some(_start_date_val) = start_date {
@@ -84,10 +94,22 @@ pub async fn handle_query_command(
                 println!("Querying date: {}...", _start_date_val.format("%Y-%m-%d"));
             }
         }
+
+        // NEW: Show filters briefly
+        if customer.is_some() || work_item.is_some() {
+            let mut filters = Vec::new();
+            if let Some(c) = &customer {
+                filters.push(format!("customer: {}", c));
+            }
+            if let Some(wi) = &work_item {
+                filters.push(format!("work item: {}", wi));
+            }
+            println!("Filters: {}", filters.join(", "));
+        }
     }
 
-    // Start the dog walking animation in a separate task (only for single-day queries)
-    let animation_handle = if !verbose && start_date.is_some() && target_days == 1 {
+    // FIXED: Start the dog walking animation for both single-day and multi-day queries
+    let animation_handle = if !verbose && start_date.is_some() {
         Some(start_walking_dog_animation())
     } else {
         None
@@ -209,9 +231,55 @@ pub async fn handle_query_command(
     // Store a clone of all_items for later use in the "no entries today" message
     let all_items_clone = all_items.clone();
 
+    // NEW: Apply customer and work item filters
+    let mut filtered_items = all_items;
+
+    if customer.is_some() || work_item.is_some() {
+        if verbose {
+            println!("\n🔍 Applying customer and work item filters...");
+        }
+
+        let original_count = filtered_items.len();
+        filtered_items.retain(|item| {
+            let mut matches = true;
+
+            // Apply customer filter
+            if let Some(ref customer_filter) = customer {
+                let item_customer = extract_column_value(item, "text__1");
+                if !item_customer
+                    .to_lowercase()
+                    .contains(&customer_filter.to_lowercase())
+                {
+                    matches = false;
+                }
+            }
+
+            // Apply work item filter
+            if let Some(ref work_item_filter) = work_item {
+                let item_work_item = extract_column_value(item, "text8__1");
+                if !item_work_item
+                    .to_lowercase()
+                    .contains(&work_item_filter.to_lowercase())
+                {
+                    matches = false;
+                }
+            }
+
+            matches
+        });
+
+        if verbose {
+            println!(
+                "   Filtered from {} to {} items",
+                original_count,
+                filtered_items.len()
+            );
+        }
+    }
+
     // Then filter by date range if date filter is provided
     let (filtered_items, has_exact_matches) = if start_date.is_some() && !date_range.is_empty() {
-        let (exact_matches, non_matching_items): (Vec<Item>, Vec<Item>) = all_items
+        let (exact_matches, non_matching_items): (Vec<Item>, Vec<Item>) = filtered_items
             .into_iter()
             .partition(|item| is_item_matching_date_range(item, &date_range));
 
@@ -254,7 +322,7 @@ pub async fn handle_query_command(
             (exact_matches, has_exact)
         }
     } else {
-        (all_items, true) // If no date filter, consider all items as "matching"
+        (filtered_items, true) // If no date filter, consider all items as "matching"
     };
 
     let limited_items: Vec<Item> = filtered_items.iter().take(limit).cloned().collect();
@@ -276,6 +344,7 @@ pub async fn handle_query_command(
                     &user.name,
                     verbose,
                     has_exact_matches,
+                    customer.is_some() || work_item.is_some(), // NEW: Pass whether filters are active
                 );
             } else {
                 // Single day query - show detailed format
@@ -286,6 +355,8 @@ pub async fn handle_query_command(
                     filtered_items_len,
                     limit,
                     has_exact_matches,
+                    &customer,  // NEW: Pass customer filter
+                    &work_item, // NEW: Pass work item filter
                 );
             }
         } else {
@@ -297,25 +368,40 @@ pub async fn handle_query_command(
                 filtered_items_len,
                 limit,
                 true,
+                &customer,  // NEW: Pass customer filter
+                &work_item, // NEW: Pass work item filter
             );
         }
     } else {
         println!("\nNo items found for user '{}'", user.name);
+
+        // NEW: Show applied filters in the "no results" message
+        let mut filter_info = Vec::new();
         if let Some(_start_date_val) = start_date {
             if target_days > 1 {
                 let end_date = date_range
                     .last()
                     .map(|d| d.format("%Y-%m-%d").to_string())
                     .unwrap_or_default();
-                println!(
-                    "Date range: {} to {} ({} working days)",
+                filter_info.push(format!(
+                    "date range: {} to {} ({} working days)",
                     _start_date_val.format("%Y-%m-%d"),
                     end_date,
                     target_days
-                );
+                ));
             } else {
-                println!("Date filter: {}", _start_date_val.format("%Y-%m-%d"));
+                filter_info.push(format!("date: {}", _start_date_val.format("%Y-%m-%d")));
             }
+        }
+        if let Some(c) = &customer {
+            filter_info.push(format!("customer: {}", c));
+        }
+        if let Some(wi) = &work_item {
+            filter_info.push(format!("work item: {}", wi));
+        }
+
+        if !filter_info.is_empty() {
+            println!("Filters: {}", filter_info.join(", "));
         }
 
         // Special handling for "no entries today, but entries exist later" case
@@ -467,6 +553,21 @@ pub async fn handle_query_command(
                     );
                 }
             }
+        }
+    }
+
+    // NEW: Show applied filters in final message
+    if customer.is_some() || work_item.is_some() {
+        let mut filter_summary = Vec::new();
+        if let Some(c) = &customer {
+            filter_summary.push(format!("customer: {}", c));
+        }
+        if let Some(wi) = &work_item {
+            filter_summary.push(format!("work item: {}", wi));
+        }
+
+        if !filter_summary.is_empty() {
+            println!("Applied filters: {}", filter_summary.join(", "));
         }
     }
 
@@ -661,15 +762,16 @@ fn map_column_title(column_id: &str) -> &str {
         "person" => "Person",
         "status" => "Status",
         "date4" => "Date",
-        "text__1" => "Text",
-        "text8__1" => "Text 8",
-        "numbers__1" => "Numbers",
+        "text__1" => "Customer",
+        "text8__1" => "Work Item",
+        "numbers__1" => "Hours",
         "hours" => "Hours",
         "days" => "Days",
         "activity_type" => "Activity Type",
         "customer" => "Customer",
         "work_item" => "Work Item",
-        _ => column_id, // Fall back to the ID if no mapping found
+        "text" => "Comment", // NEW: Map text column to Comment
+        _ => column_id,      // Fall back to the ID if no mapping found
     }
 }
 
@@ -746,6 +848,7 @@ fn display_simplified_table(
     user_name: &str,
     verbose: bool,
     has_exact_matches: bool,
+    has_filters: bool, // NEW: Parameter to indicate if filters are active
 ) {
     println!("\n=== CLAIMS SUMMARY for User {} ===", user_name);
 
@@ -772,12 +875,12 @@ fn display_simplified_table(
         );
     }
 
-    // Create a table header with Status column
+    // UPDATED: Create a table header with Comment column
     println!(
-        "\n{:<12} {:<12} {:<20} {:<15} {:<6}",
-        "Date", "Status", "Customer", "Work Item", "Hours"
+        "\n{:<12} {:<12} {:<20} {:<15} {:<6} {:<20}",
+        "Date", "Status", "Customer", "Work Item", "Hours", "Comment"
     );
-    println!("{}", "-".repeat(70));
+    println!("{}", "-".repeat(90));
 
     // Group items by date using a HashMap with exact date matching
     let mut items_by_date: std::collections::HashMap<String, Vec<&Item>> =
@@ -800,48 +903,64 @@ fn display_simplified_table(
     // Display items in date range order
     let mut total_hours: f64 = 0.0;
     let mut displayed_items = 0;
+    let mut displayed_dates_count = 0;
 
+    // NEW: Determine which dates to display based on whether filters are active
     for date in date_range {
         let date_str = date.format("%Y-%m-%d").to_string();
 
         if let Some(date_items) = items_by_date.get(&date_str) {
+            // Always show dates that have items
+            displayed_dates_count += 1;
             displayed_items += date_items.len();
             for item in date_items {
                 let status = extract_status_value(item);
                 let customer = extract_column_value(item, "text__1");
                 let work_item = extract_column_value(item, "text8__1");
                 let hours_str = extract_column_value(item, "numbers__1");
+                let comment = extract_column_value(item, "text"); // NEW: Extract comment
                 let hours = hours_str.parse::<f64>().unwrap_or(0.0);
                 total_hours += hours;
 
                 println!(
-                    "{:<12} {:<12} {:<20} {:<15} {:<6}",
+                    "{:<12} {:<12} {:<20} {:<15} {:<6} {:<20}",
                     date_str,
                     truncate_string(&status, 10),
                     truncate_string(&customer, 18),
                     truncate_string(&work_item, 13),
-                    hours_str
+                    hours_str,
+                    truncate_string(&comment, 18) // NEW: Display comment
                 );
             }
-        } else {
-            // Show empty row for dates with no entries
+        } else if !has_filters {
+            // Only show empty rows when no filters are active
+            displayed_dates_count += 1;
             println!(
-                "{:<12} {:<12} {:<20} {:<15} {:<6}",
-                date_str, "-", "-", "-", "-"
+                "{:<12} {:<12} {:<20} {:<15} {:<6} {:<20}",
+                date_str, "-", "-", "-", "-", "-"
             );
         }
     }
 
-    println!("{}", "-".repeat(70));
+    println!("{}", "-".repeat(90));
     println!(
-        "{:<12} {:<12} {:<20} {:<15} {:<6.1}",
-        "TOTAL", "", "", "", total_hours
+        "{:<12} {:<12} {:<20} {:<15} {:<6.1} {:<20}",
+        "TOTAL", "", "", "", total_hours, ""
     );
-    println!(
-        "\nFound {} items across {} days",
-        displayed_items,
-        date_range.len()
-    );
+
+    // NEW: Show appropriate count message based on whether filters are active
+    if has_filters {
+        println!(
+            "\nFound {} items matching filters across {} days",
+            displayed_items, displayed_dates_count
+        );
+    } else {
+        println!(
+            "\nFound {} items across {} days",
+            displayed_items,
+            date_range.len()
+        );
+    }
 
     // Show message if we have items but they don't match the exact date range
     if items.len() > 0 && displayed_items == 0 {
@@ -877,6 +996,8 @@ fn display_detailed_items(
     filtered_items_len: usize,
     limit: usize,
     has_exact_matches: bool,
+    customer_filter: &Option<String>, // NEW: Customer filter for display
+    work_item_filter: &Option<String>, // NEW: Work item filter for display
 ) {
     println!("\n=== FILTERED ITEMS for User {} ===", user_name);
 
@@ -900,6 +1021,7 @@ fn display_detailed_items(
             if let Some(next_date) = future_dates.first() {
                 let days_diff = (*next_date - date).num_days();
                 let day_word = if days_diff == 1 { "day" } else { "days" };
+
                 println!(
                     "⚠️  No entries found for {}. Next available date: {} ({} {} later)",
                     date.format("%Y-%m-%d"),
@@ -909,6 +1031,18 @@ fn display_detailed_items(
                 );
             }
         }
+    }
+
+    // NEW: Show applied filters
+    if customer_filter.is_some() || work_item_filter.is_some() {
+        let mut filters = Vec::new();
+        if let Some(c) = customer_filter {
+            filters.push(format!("customer: {}", c));
+        }
+        if let Some(wi) = work_item_filter {
+            filters.push(format!("work item: {}", wi));
+        }
+        println!("Applied filters: {}", filters.join(", "));
     }
 
     if !has_exact_matches && !items.is_empty() {
@@ -1132,7 +1266,8 @@ mod tests {
         assert_eq!(map_column_title("date4"), "Date");
         assert_eq!(map_column_title("person"), "Person");
         assert_eq!(map_column_title("status"), "Status");
-        assert_eq!(map_column_title("text__1"), "Text");
+        assert_eq!(map_column_title("text__1"), "Customer");
+        assert_eq!(map_column_title("text"), "Comment"); // NEW: Test comment mapping
         assert_eq!(map_column_title("unknown"), "unknown");
     }
 
@@ -1143,8 +1278,15 @@ mod tests {
         let empty_date_range: Vec<NaiveDate> = Vec::new();
 
         // These should not panic
-        display_simplified_table(&empty_items, &empty_date_range, "test_user", false, true);
-        display_detailed_items(&empty_items, None, "test_user", 0, 10, true);
+        display_simplified_table(
+            &empty_items,
+            &empty_date_range,
+            "test_user",
+            false,
+            true,
+            false,
+        );
+        display_detailed_items(&empty_items, None, "test_user", 0, 10, true, &None, &None);
     }
 
     #[test]

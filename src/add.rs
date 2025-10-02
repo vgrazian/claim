@@ -16,6 +16,7 @@ pub async fn handle_add_command(
     work_item: Option<String>,
     hours: Option<f64>,
     days: Option<f64>,
+    comment: Option<String>, // NEW: Comment parameter
     yes: bool,
     verbose: bool,
 ) -> Result<()> {
@@ -26,6 +27,7 @@ pub async fn handle_add_command(
         final_work_item,
         final_hours,
         final_days,
+        final_comment, // NEW: Store comment
         is_interactive,
     ) = if date.is_none()
         && activity_type.is_none()
@@ -33,10 +35,12 @@ pub async fn handle_add_command(
         && work_item.is_none()
         && hours.is_none()
         && days.is_none()
+        && comment.is_none()
+    // NEW: Check comment in interactive mode
     {
         // Interactive mode - no parameters provided
-        let (d, at, c, wi, h, d_val) = prompt_for_claim_details()?;
-        (d, at, c, wi, h, d_val, true)
+        let (d, at, c, wi, h, d_val, cmt) = prompt_for_claim_details()?;
+        (d, at, c, wi, h, d_val, cmt, true)
     } else {
         // Command line mode - use provided parameters
         // Validate date if provided
@@ -50,6 +54,7 @@ pub async fn handle_add_command(
             work_item,
             hours,
             days,
+            comment, // NEW: Pass through comment
             false,
         )
     };
@@ -95,6 +100,10 @@ pub async fn handle_add_command(
         final_work_item.as_deref().unwrap_or("Not specified")
     );
     println!(
+        "Comment: {}",
+        final_comment.as_deref().unwrap_or("Not specified")
+    );
+    println!(
         "Hours: {}",
         final_hours
             .map(|h| h.to_string())
@@ -126,6 +135,7 @@ pub async fn handle_add_command(
             &activity_type_value,
             &final_customer,
             &final_work_item,
+            &final_comment, // NEW: Include comment
             final_hours,
             user.id,
             &user.name,
@@ -164,6 +174,7 @@ pub async fn handle_add_command(
         activity_type_value,
         &final_customer,
         &final_work_item,
+        &final_comment, // NEW: Include comment
         final_hours,
         user.id,
         &user.name,
@@ -179,6 +190,7 @@ pub async fn handle_add_command(
             &activity_type_str,
             &final_customer,
             &final_work_item,
+            &final_comment, // NEW: Include comment
             final_hours,
             days_value,
             yes,
@@ -195,6 +207,7 @@ async fn create_items_on_monday(
     activity_type_value: u8,
     customer: &Option<String>,
     work_item: &Option<String>,
+    comment: &Option<String>, // NEW: Comment parameter
     hours: Option<f64>,
     user_id: i64,
     user_name: &str,
@@ -242,6 +255,13 @@ async fn create_items_on_monday(
         if let Some(wi) = work_item {
             if !wi.is_empty() {
                 column_values["text8__1"] = json!(wi);
+            }
+        }
+
+        // NEW: Set comment if provided
+        if let Some(cmt) = comment {
+            if !cmt.is_empty() {
+                column_values["text"] = json!(cmt); // Assuming 'text' column for comments
             }
         }
 
@@ -325,6 +345,7 @@ fn show_graphql_mutations(
     activity_type_value: &u8,
     customer: &Option<String>,
     work_item: &Option<String>,
+    comment: &Option<String>, // NEW: Comment parameter
     hours: Option<f64>,
     user_id: i64,
     user_name: &str,
@@ -370,6 +391,13 @@ fn show_graphql_mutations(
         if let Some(wi) = work_item {
             if !wi.is_empty() {
                 column_values["text8__1"] = json!(wi);
+            }
+        }
+
+        // NEW: Set comment if provided
+        if let Some(cmt) = comment {
+            if !cmt.is_empty() {
+                column_values["text"] = json!(cmt);
             }
         }
 
@@ -421,6 +449,7 @@ fn show_equivalent_command(
     activity_type: &str,
     customer: &Option<String>,
     work_item: &Option<String>,
+    comment: &Option<String>, // NEW: Comment parameter
     hours: Option<f64>,
     days: f64,
     yes: bool,
@@ -445,6 +474,13 @@ fn show_equivalent_command(
     if let Some(wi) = work_item {
         if !wi.is_empty() {
             command_parts.push(format!("-w \"{}\"", wi));
+        }
+    }
+
+    // NEW: Include comment if provided
+    if let Some(cmt) = comment {
+        if !cmt.is_empty() {
+            command_parts.push(format!("--comment \"{}\"", cmt));
         }
     }
 
@@ -477,6 +513,7 @@ fn prompt_for_claim_details() -> Result<(
     Option<String>,
     Option<f64>,
     Option<f64>,
+    Option<String>, // NEW: Return comment
 )> {
     use std::io::{self, Write};
 
@@ -504,8 +541,21 @@ fn prompt_for_claim_details() -> Result<(
         }
     }
 
-    // Activity type (optional, defaults to billable)
-    print!("Activity type (optional, default: billable): ");
+    // Activity type (optional, defaults to billable) - IMPROVED: Show available options
+    println!("\nAvailable activity types:");
+    println!(" 0 - vacation");
+    println!(" 1 - billable (default)");
+    println!(" 2 - holding");
+    println!(" 3 - education");
+    println!(" 4 - work_reduction");
+    println!(" 5 - tbd");
+    println!(" 6 - holiday");
+    println!(" 7 - presales");
+    println!(" 8 - illness");
+    println!(" 9 - boh1");
+    println!("10 - boh2");
+    println!("11 - boh3");
+    print!("\nActivity type (enter number or name, optional - default: billable): ");
     io::stdout().flush()?;
     let mut activity_type = String::new();
     io::stdin().read_line(&mut activity_type)?;
@@ -514,7 +564,51 @@ fn prompt_for_claim_details() -> Result<(
     let activity_type = if activity_type.is_empty() {
         None
     } else {
-        Some(activity_type)
+        // Handle numeric input
+        if let Ok(num) = activity_type.parse::<u8>() {
+            match num {
+                0 => Some("vacation".to_string()),
+                1 => Some("billable".to_string()),
+                2 => Some("holding".to_string()),
+                3 => Some("education".to_string()),
+                4 => Some("work_reduction".to_string()),
+                5 => Some("tbd".to_string()),
+                6 => Some("holiday".to_string()),
+                7 => Some("presales".to_string()),
+                8 => Some("illness".to_string()),
+                9 => Some("boh1".to_string()),
+                10 => Some("boh2".to_string()),
+                11 => Some("boh3".to_string()),
+                _ => {
+                    println!("Invalid activity type number. Using default 'billable'.");
+                    Some("billable".to_string())
+                }
+            }
+        } else {
+            // Handle text input
+            let normalized_type = activity_type.to_lowercase();
+            match normalized_type.as_str() {
+                "vacation" | "0" => Some("vacation".to_string()),
+                "billable" | "1" => Some("billable".to_string()),
+                "holding" | "2" => Some("holding".to_string()),
+                "education" | "3" => Some("education".to_string()),
+                "work_reduction" | "4" => Some("work_reduction".to_string()),
+                "tbd" | "5" => Some("tbd".to_string()),
+                "holiday" | "6" => Some("holiday".to_string()),
+                "presales" | "7" => Some("presales".to_string()),
+                "illness" | "8" => Some("illness".to_string()),
+                "boh1" | "9" => Some("boh1".to_string()),
+                "boh2" | "10" => Some("boh2".to_string()),
+                "boh3" | "11" => Some("boh3".to_string()),
+                _ => {
+                    println!(
+                        "Unknown activity type '{}'. Using default 'billable'.",
+                        activity_type
+                    );
+                    Some("billable".to_string())
+                }
+            }
+        }
     };
 
     // Customer name (optional)
@@ -539,6 +633,18 @@ fn prompt_for_claim_details() -> Result<(
         None
     } else {
         Some(work_item)
+    };
+
+    // NEW: Comment (optional)
+    print!("Comment (optional): ");
+    io::stdout().flush()?;
+    let mut comment = String::new();
+    io::stdin().read_line(&mut comment)?;
+    let comment = comment.trim().to_string();
+    let comment = if comment.is_empty() {
+        None
+    } else {
+        Some(comment)
     };
 
     // Hours (optional)
@@ -577,7 +683,15 @@ fn prompt_for_claim_details() -> Result<(
         }
     };
 
-    Ok((date, activity_type, customer, work_item, hours, days))
+    Ok((
+        date,
+        activity_type,
+        customer,
+        work_item,
+        hours,
+        days,
+        comment,
+    ))
 }
 
 fn validate_date_flexible(date_str: &str) -> Result<()> {
@@ -632,6 +746,7 @@ mod tests {
             "billable",
             &Some("Customer".to_string()),
             &Some("WorkItem".to_string()),
+            &Some("Test comment".to_string()), // NEW: Test with comment
             Some(8.0),
             1.0,
             false,
@@ -643,6 +758,7 @@ mod tests {
             "vacation",
             &None,
             &None,
+            &None, // NEW: Test without comment
             None,
             5.0,
             true,
@@ -653,6 +769,7 @@ mod tests {
         show_equivalent_command(
             "2025-09-15",
             "billable",
+            &None,
             &None,
             &None,
             None,
@@ -697,6 +814,7 @@ mod tests {
             "billable",
             &Some("Customer with spaces".to_string()),
             &Some("Work/Item".to_string()),
+            &Some("Comment with \"quotes\"".to_string()), // NEW: Test comment with special chars
             Some(7.5),
             2.5,
             true,
@@ -709,6 +827,7 @@ mod tests {
             "billable",
             &Some("A".repeat(100)),
             &Some("B".repeat(100)),
+            &Some("C".repeat(100)), // NEW: Test long comment
             Some(999.99),
             99.0,
             false,
@@ -756,7 +875,8 @@ mod tests {
             },
             "status": {
                 "index": 1
-            }
+            },
+            "text": "Test comment"  // NEW: Test comment field
         });
 
         assert!(!column_values.to_string().is_empty());

@@ -38,6 +38,14 @@ enum Commands {
         #[arg(short = 'd', long, default_value_t = 1)]
         days: usize,
 
+        /// Customer name to filter by
+        #[arg(short = 'c', long)] // NEW: Customer filter for query
+        customer: Option<String>,
+
+        /// Work item to filter by
+        #[arg(short = 'w', long)] // NEW: Work item filter for query
+        work_item: Option<String>,
+
         /// Verbose output
         #[arg(short = 'v', long)]
         verbose: bool,
@@ -67,6 +75,10 @@ enum Commands {
         /// Number of working days (default: 1, skips weekends)
         #[arg(short = 'd', long)]
         days: Option<f64>,
+
+        /// Comment for the claim
+        #[arg(long = "comment")] // NEW: Comment parameter
+        comment: Option<String>,
 
         /// Skip confirmation prompt
         #[arg(short = 'y', long)]
@@ -167,9 +179,14 @@ async fn run(cli: Cli) -> Result<()> {
             limit,
             date,
             days,
+            customer,  // NEW: Pass customer filter
+            work_item, // NEW: Pass work item filter
             verbose,
         }) => {
-            query::handle_query_command(&client, &user, limit, date, days, verbose).await?;
+            query::handle_query_command(
+                &client, &user, limit, date, days, customer, work_item, verbose,
+            )
+            .await?;
         }
         Some(Commands::Add {
             date,
@@ -178,6 +195,7 @@ async fn run(cli: Cli) -> Result<()> {
             work_item,
             hours,
             days,
+            comment, // NEW: Pass comment
             yes,
             verbose,
         }) => {
@@ -191,6 +209,7 @@ async fn run(cli: Cli) -> Result<()> {
                 work_item,
                 hours,
                 days,
+                comment, // NEW: Pass comment
                 yes,
                 verbose,
             )
@@ -237,6 +256,7 @@ fn show_equivalent_command(
     activity_type: &str,
     customer: &Option<String>,
     work_item: &Option<String>,
+    comment: &Option<String>, // NEW: Comment parameter
     hours: Option<f64>,
     days: f64,
     yes: bool,
@@ -261,6 +281,13 @@ fn show_equivalent_command(
     if let Some(wi) = work_item {
         if !wi.is_empty() {
             command_parts.push(format!("-w \"{}\"", wi));
+        }
+    }
+
+    // NEW: Include comment if provided
+    if let Some(cmt) = comment {
+        if !cmt.is_empty() {
+            command_parts.push(format!("--comment \"{}\"", cmt));
         }
     }
 
@@ -293,6 +320,7 @@ fn prompt_for_claim_details() -> Result<(
     Option<String>,
     Option<f64>,
     Option<f64>,
+    Option<String>, // NEW: Return comment
 )> {
     use std::io::{self, Write};
 
@@ -357,6 +385,18 @@ fn prompt_for_claim_details() -> Result<(
         Some(work_item)
     };
 
+    // NEW: Comment (optional)
+    print!("Comment (optional): ");
+    io::stdout().flush()?;
+    let mut comment = String::new();
+    io::stdin().read_line(&mut comment)?;
+    let comment = comment.trim().to_string();
+    let comment = if comment.is_empty() {
+        None
+    } else {
+        Some(comment)
+    };
+
     // Hours (optional)
     print!("Number of hours (optional): ");
     io::stdout().flush()?;
@@ -393,7 +433,15 @@ fn prompt_for_claim_details() -> Result<(
         }
     };
 
-    Ok((date, activity_type, customer, work_item, hours, days))
+    Ok((
+        date,
+        activity_type,
+        customer,
+        work_item,
+        hours,
+        days,
+        comment,
+    ))
 }
 
 fn validate_date_flexible(date_str: &str) -> Result<()> {
@@ -407,6 +455,7 @@ async fn create_items_on_monday(
     activity_type_value: u8,
     customer: &Option<String>,
     work_item: &Option<String>,
+    comment: &Option<String>, // NEW: Comment parameter
     hours: Option<f64>,
     user_id: i64,
     user_name: &str,
@@ -457,6 +506,13 @@ async fn create_items_on_monday(
         if let Some(wi) = work_item {
             if !wi.is_empty() {
                 column_values["text8__1"] = json!(wi);
+            }
+        }
+
+        // NEW: Set comment if provided
+        if let Some(cmt) = comment {
+            if !cmt.is_empty() {
+                column_values["text"] = json!(cmt);
             }
         }
 
@@ -540,6 +596,7 @@ fn show_graphql_mutations(
     activity_type_value: &u8,
     customer: &Option<String>,
     work_item: &Option<String>,
+    comment: &Option<String>, // NEW: Comment parameter
     hours: Option<f64>,
     user_id: i64,
     user_name: &str,
@@ -587,6 +644,13 @@ fn show_graphql_mutations(
         if let Some(wi) = work_item {
             if !wi.is_empty() {
                 column_values["text8__1"] = json!(wi);
+            }
+        }
+
+        // NEW: Set comment if provided
+        if let Some(cmt) = comment {
+            if !cmt.is_empty() {
+                column_values["text"] = json!(cmt);
             }
         }
 
