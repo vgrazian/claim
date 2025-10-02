@@ -587,8 +587,8 @@ fn prompt_for_claim_details() -> Result<(
                 }
             }
         } else {
-            // Handle text input
-            let normalized_type = activity_type.to_lowercase();
+            // Handle text input with case insensitivity and flexible formatting
+            let normalized_type = normalize_activity_type_input(&activity_type);
             match normalized_type.as_str() {
                 "vacation" | "0" => Some("vacation".to_string()),
                 "billable" | "1" => Some("billable".to_string()),
@@ -605,10 +605,11 @@ fn prompt_for_claim_details() -> Result<(
                 "boh4" | "12" => Some("boh4".to_string()),
                 _ => {
                     println!(
-                        "Unknown activity type '{}'. Using default 'billable'.",
+                        "❌ Error: Unknown activity type '{}'. Please use a valid number or name.",
                         activity_type
                     );
-                    Some("billable".to_string())
+                    println!("Valid options: vacation, billable, holding, education, work_reduction, tbd, holiday, presales, illness, boh1, boh2, boh3, boh4");
+                    return Err(anyhow!("Unknown activity type: {}", activity_type));
                 }
             }
         }
@@ -695,6 +696,24 @@ fn prompt_for_claim_details() -> Result<(
         days,
         comment,
     ))
+}
+
+// NEW: Helper function to normalize activity type input
+fn normalize_activity_type_input(input: &str) -> String {
+    let normalized = input.to_lowercase().replace(' ', "_").replace('-', "_");
+
+    // Handle common variations
+    match normalized.as_str() {
+        "work_reduction" | "workreduction" | "work reduction" => "work_reduction".to_string(),
+        "paid_not_worked" | "paidnotworked" | "paid not worked" => "paid_not_worked".to_string(),
+        "intellectual_capital" | "intellectualcapital" | "intellectual capital" => {
+            "intellectual_capital".to_string()
+        }
+        "business_development" | "businessdevelopment" | "business development" => {
+            "business_development".to_string()
+        }
+        _ => normalized,
+    }
 }
 
 fn validate_date_flexible(date_str: &str) -> Result<()> {
@@ -883,5 +902,49 @@ mod tests {
         });
 
         assert!(!column_values.to_string().is_empty());
+    }
+
+    #[test]
+    fn test_normalize_activity_type_input() {
+        // Test case insensitivity
+        assert_eq!(normalize_activity_type_input("VACATION"), "vacation");
+        assert_eq!(normalize_activity_type_input("Billable"), "billable");
+
+        // Test space to underscore conversion
+        assert_eq!(
+            normalize_activity_type_input("work reduction"),
+            "work_reduction"
+        );
+        assert_eq!(
+            normalize_activity_type_input("business development"),
+            "business_development"
+        );
+
+        // Test hyphen to underscore conversion
+        assert_eq!(
+            normalize_activity_type_input("work-reduction"),
+            "work_reduction"
+        );
+        assert_eq!(
+            normalize_activity_type_input("business-development"),
+            "business_development"
+        );
+
+        // Test mixed cases
+        assert_eq!(
+            normalize_activity_type_input("Work-Reduction"),
+            "work_reduction"
+        );
+        assert_eq!(
+            normalize_activity_type_input("Business Development"),
+            "business_development"
+        );
+
+        // Test already normalized inputs
+        assert_eq!(normalize_activity_type_input("vacation"), "vacation");
+        assert_eq!(
+            normalize_activity_type_input("work_reduction"),
+            "work_reduction"
+        );
     }
 }
