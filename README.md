@@ -83,11 +83,13 @@ No command specified. Use --help for available commands.
 Query claims from Monday.com board.
 
 ```bash
-claim query [--date DATE] [--days DAYS] [--limit LIMIT] [-v]
+claim query [--date DATE] [--customer CUSTOMER] [--work-item WORK_ITEM] [--days DAYS] [--limit LIMIT] [-v]
 ```
 
 **Options:**
 - `-D, --date DATE`: Date to filter claims (YYYY-MM-DD, YYYY.MM.DD, or YYYY/MM/DD format)
+- `-c, --customer CUSTOMER`: Customer name to filter on
+- `-w, --work-item WORK_ITEM`: Work item to filter on
 - `-d, --days DAYS`: Number of working days to query (default: 1, skips weekends)
 - `--limit LIMIT`: Number of rows to display (default: 5)
 - `-v, --verbose`: Verbose output
@@ -102,6 +104,9 @@ claim query -D 2025-09-15 -d 5
 
 # Query 10 days with increased limit and verbose output
 claim query -D 2025-09-01 -d 10 --limit 20 -v
+
+# Run a weekly report for all entries related to customer CUST1 and work item WI.1001
+claim query -D 2025-09-15 -c CUST1 -w WI.1001 -d 5
 ```
 
 **Output for multi-day query:**
@@ -111,16 +116,16 @@ Running for user id *****, user name ***** *****, email ******** for year ####
 === CLAIMS SUMMARY for User ***** ***** ===
 Date Range: 2025-04-07 to 2025-04-11
 
-Date         Status       Customer             Work Item       Hours
-----------------------------------------------------------------------
-2025-04-07   presales     CUSTOMER_A           PROJ-123        8
-2025-04-08   presales     CUSTOMER_A           PROJ-123        8
-2025-04-09   presales     CUSTOMER_A           PROJ-123        8
-2025-04-10   billable     CUSTOMER_B           TASK-456        4
-2025-04-10   presales     CUSTOMER_C           WI-789          4
-2025-04-11   presales     CUSTOMER_C           WI-789          8
-----------------------------------------------------------------------
-TOTAL                                                          40.0
+Date         Status       Customer             Work Item       Comment    Hours
+------------------------------------------------------------------------------
+2025-04-07   presales     CUSTOMER_A           PROJ-123        my comment 8
+2025-04-08   presales     CUSTOMER_A           PROJ-123                   8
+2025-04-09   presales     CUSTOMER_A           PROJ-123                   8
+2025-04-10   billable     CUSTOMER_B           TASK-456                   4
+2025-04-10   presales     CUSTOMER_C           WI-789          another    4
+2025-04-11   presales     CUSTOMER_C           WI-789          comment    8
+------------------------------------------------------------------------------
+TOTAL                                                                     40.0
 
 Found 6 items across 5 days
 
@@ -132,14 +137,15 @@ Found 6 items across 5 days
 Add a new claim entry.
 
 ```bash
-claim add [--date DATE] [--activity-type TYPE] [--customer CUSTOMER] [--work-item WORK_ITEM] [--hours HOURS] [--days DAYS] [-y] [-v]
+claim add [--date DATE] [--activity-type TYPE] [--customer CUSTOMER] [--work-item WORK_ITEM] [--comment COMMENT] [--hours HOURS] [--days DAYS] [--yes] [--verbose]
 ```
 
 **Options:**
 - `-D, --date DATE`: Date (YYYY-MM-DD format, defaults to today)
-- `-t, --activity-type TYPE`: Activity type: vacation, billable, holding, education, work_reduction, tbd, holiday, presales, illness, boh1, boh2, boh3 (default: billable)
+- `-t, --activity-type TYPE`: Activity type: vacation, billable, holding, education, work_reduction, tbd, holiday, presales, illness, boh1, boh2, boh3 (default: billable), the corresponding numerical value can be used
 - `-c, --customer CUSTOMER`: Customer name
 - `-w, --work-item WORK_ITEM`: Work item
+- `-k, --comment COMMENT`: Comment
 - `-H, --hours HOURS`: Number of hours worked
 - `-d, --days DAYS`: Number of working days (default: 1, skips weekends)
 - `-y, --yes`: Skip confirmation prompt
@@ -208,7 +214,7 @@ claim delete --delete-id ID
 ```
 
 **Options:**
-- `-x, --delete-id ID`: **Required** Item ID to delete (find in your query output the correct ID)
+- `-x, --id ID`: **Required** Item ID to delete (find in your query output the correct ID)
 - `-y, --yes`: Skip confirmation prompt
 - `-v, --verbose`: Verbose output
 
