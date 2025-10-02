@@ -3,6 +3,8 @@ mod config;
 mod delete;
 mod monday;
 mod query;
+mod selenium;
+mod time;
 mod utils;
 
 use anyhow::{anyhow, Result};
