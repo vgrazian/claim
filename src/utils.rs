@@ -175,6 +175,25 @@ pub fn map_activity_value_to_name(value: u8) -> String {
     }
 }
 
+/// Normalizes activity type input for flexible user input
+pub fn normalize_activity_type_input(input: &str) -> String {
+    let normalized = input.to_lowercase().replace(' ', "_").replace('-', "_");
+
+    // Handle common variations
+    match normalized.as_str() {
+        "work_reduction" | "workreduction" | "work reduction" => "work_reduction".to_string(),
+        "paid_not_worked" | "paidnotworked" | "paid not worked" => "paid_not_worked".to_string(),
+        "intellectual_capital" | "intellectualcapital" | "intellectual capital" => {
+            "intellectual_capital".to_string()
+        }
+        "business_development" | "businessdevelopment" | "business development" => {
+            "business_development".to_string()
+        }
+        "overhead" | "over head" | "over-head" => "overhead".to_string(),
+        _ => normalized,
+    }
+}
+
 // ===== PERFORMANCE UTILITIES =====
 
 /// A simple timer for performance measurement
@@ -521,11 +540,80 @@ mod tests {
     fn test_activity_type_mapping() {
         assert_eq!(map_activity_type_to_value("billable"), 1);
         assert_eq!(map_activity_type_to_value("vacation"), 0);
+        assert_eq!(map_activity_type_to_value("holding"), 2);
         assert_eq!(map_activity_type_to_value("unknown"), 1); // default
 
         assert_eq!(map_activity_value_to_name(1), "billable");
         assert_eq!(map_activity_value_to_name(0), "vacation");
+        assert_eq!(map_activity_value_to_name(9), "paid_not_worked");
+        assert_eq!(map_activity_value_to_name(10), "intellectual_capital");
+        assert_eq!(map_activity_value_to_name(11), "business_development");
+        assert_eq!(map_activity_value_to_name(12), "overhead");
         assert_eq!(map_activity_value_to_name(99), "unknown(99)");
+    }
+
+    #[test]
+    fn test_normalize_activity_type_input() {
+        // Test case insensitivity
+        assert_eq!(normalize_activity_type_input("VACATION"), "vacation");
+        assert_eq!(normalize_activity_type_input("Billable"), "billable");
+
+        // Test space to underscore conversion
+        assert_eq!(
+            normalize_activity_type_input("work reduction"),
+            "work_reduction"
+        );
+        assert_eq!(
+            normalize_activity_type_input("business development"),
+            "business_development"
+        );
+
+        // Test hyphen to underscore conversion
+        assert_eq!(
+            normalize_activity_type_input("work-reduction"),
+            "work_reduction"
+        );
+        assert_eq!(
+            normalize_activity_type_input("business-development"),
+            "business_development"
+        );
+
+        // Test mixed cases
+        assert_eq!(
+            normalize_activity_type_input("Work-Reduction"),
+            "work_reduction"
+        );
+        assert_eq!(
+            normalize_activity_type_input("Business Development"),
+            "business_development"
+        );
+
+        // Test already normalized inputs
+        assert_eq!(normalize_activity_type_input("vacation"), "vacation");
+        assert_eq!(
+            normalize_activity_type_input("work_reduction"),
+            "work_reduction"
+        );
+
+        // Test the corrected activity types
+        assert_eq!(
+            normalize_activity_type_input("paid not worked"),
+            "paid_not_worked"
+        );
+        assert_eq!(
+            normalize_activity_type_input("paid-not-worked"),
+            "paid_not_worked"
+        );
+        assert_eq!(
+            normalize_activity_type_input("intellectual capital"),
+            "intellectual_capital"
+        );
+        assert_eq!(
+            normalize_activity_type_input("intellectual-capital"),
+            "intellectual_capital"
+        );
+        assert_eq!(normalize_activity_type_input("over head"), "overhead");
+        assert_eq!(normalize_activity_type_input("over-head"), "overhead");
     }
 
     #[test]

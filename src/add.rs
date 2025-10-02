@@ -552,10 +552,10 @@ fn prompt_for_claim_details() -> Result<(
     println!(" 6 - holiday");
     println!(" 7 - presales");
     println!(" 8 - illness");
-    println!(" 9 - boh1");
-    println!("10 - boh2");
-    println!("11 - boh3");
-    println!("12 - boh4");
+    println!(" 9 - paid_not_worked");
+    println!("10 - intellectual_capital");
+    println!("11 - business_development");
+    println!("12 - overhead");
     print!("\nActivity type (enter number or name, optional - default: billable): ");
     io::stdout().flush()?;
     let mut activity_type = String::new();
@@ -577,10 +577,10 @@ fn prompt_for_claim_details() -> Result<(
                 6 => Some("holiday".to_string()),
                 7 => Some("presales".to_string()),
                 8 => Some("illness".to_string()),
-                9 => Some("boh1".to_string()),
-                10 => Some("boh2".to_string()),
-                11 => Some("boh3".to_string()),
-                12 => Some("boh4".to_string()),
+                9 => Some("paid_not_worked".to_string()),
+                10 => Some("intellectual_capital".to_string()),
+                11 => Some("business_development".to_string()),
+                12 => Some("overhead".to_string()),
                 _ => {
                     println!("Invalid activity type number. Using default 'billable'.");
                     Some("billable".to_string())
@@ -599,16 +599,16 @@ fn prompt_for_claim_details() -> Result<(
                 "holiday" | "6" => Some("holiday".to_string()),
                 "presales" | "7" => Some("presales".to_string()),
                 "illness" | "8" => Some("illness".to_string()),
-                "boh1" | "9" => Some("boh1".to_string()),
-                "boh2" | "10" => Some("boh2".to_string()),
-                "boh3" | "11" => Some("boh3".to_string()),
-                "boh4" | "12" => Some("boh4".to_string()),
+                "paid_not_worked" | "9" => Some("paid_not_worked".to_string()),
+                "intellectual_capital" | "10" => Some("intellectual_capital".to_string()),
+                "business_development" | "11" => Some("business_development".to_string()),
+                "overhead" | "12" => Some("overhead".to_string()),
                 _ => {
                     println!(
                         "❌ Error: Unknown activity type '{}'. Please use a valid number or name.",
                         activity_type
                     );
-                    println!("Valid options: vacation, billable, holding, education, work_reduction, tbd, holiday, presales, illness, boh1, boh2, boh3, boh4");
+                    println!("Valid options: vacation, billable, holding, education, work_reduction, tbd, holiday, presales, illness, paid_not_worked, intellectual_capital, business_development, overhead");
                     return Err(anyhow!("Unknown activity type: {}", activity_type));
                 }
             }
@@ -712,6 +712,7 @@ fn normalize_activity_type_input(input: &str) -> String {
         "business_development" | "businessdevelopment" | "business development" => {
             "business_development".to_string()
         }
+        "overhead" | "over head" | "over-head" => "overhead".to_string(),
         _ => normalized,
     }
 }
@@ -946,5 +947,25 @@ mod tests {
             normalize_activity_type_input("work_reduction"),
             "work_reduction"
         );
+
+        // Test the corrected activity types
+        assert_eq!(
+            normalize_activity_type_input("paid not worked"),
+            "paid_not_worked"
+        );
+        assert_eq!(
+            normalize_activity_type_input("paid-not-worked"),
+            "paid_not_worked"
+        );
+        assert_eq!(
+            normalize_activity_type_input("intellectual capital"),
+            "intellectual_capital"
+        );
+        assert_eq!(
+            normalize_activity_type_input("intellectual-capital"),
+            "intellectual_capital"
+        );
+        assert_eq!(normalize_activity_type_input("over head"), "overhead");
+        assert_eq!(normalize_activity_type_input("over-head"), "overhead");
     }
 }
