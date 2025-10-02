@@ -31,75 +31,75 @@ enum Commands {
         limit: usize,
 
         /// Date to filter claims (YYYY-MM-DD, YYYY.MM.DD, or YYYY/MM/DD format, default: today)
-        #[arg(short = 'D', long)]
+        #[arg(short = 'D', long = "date")]
         date: Option<String>,
 
         /// Number of days to query (default: 1, skips weekends)
-        #[arg(short = 'd', long, default_value_t = 1)]
+        #[arg(short = 'd', long = "days", default_value_t = 1)]
         days: usize,
 
         /// Customer name to filter by
-        #[arg(short = 'c', long)] // NEW: Customer filter for query
+        #[arg(short = 'c', long = "customer")] // NEW: Customer filter for query
         customer: Option<String>,
 
         /// Work item to filter by
-        #[arg(short = 'w', long)] // NEW: Work item filter for query
+        #[arg(short = 'w', long = "wi")] // NEW: Work item filter for query
         work_item: Option<String>,
 
         /// Verbose output
-        #[arg(short = 'v', long)]
+        #[arg(short = 'v', long = "verbose")]
         verbose: bool,
     },
     /// Add a new claim
     Add {
         /// Date (YYYY-MM-DD format)
-        #[arg(short = 'D', long)]
+        #[arg(short = 'D', long = "date")]
         date: Option<String>,
 
         /// Activity type (vacation, billable, holding, education, work_reduction, tbd, holiday, presales, illness, paid_not_worked, intellectual_capital, business_development, overhead)
-        #[arg(short = 't', long)]
+        #[arg(short = 't', long = "type")]
         activity_type: Option<String>,
 
         /// Customer name
-        #[arg(short = 'c', long)]
+        #[arg(short = 'c', long = "customer")]
         customer: Option<String>,
 
         /// Work item
-        #[arg(short = 'w', long)]
+        #[arg(short = 'w', long = "wi")]
         work_item: Option<String>,
 
         /// Number of hours
-        #[arg(short = 'H', long)]
+        #[arg(short = 'H', long = "hours")]
         hours: Option<f64>,
 
         /// Number of working days (default: 1, skips weekends)
-        #[arg(short = 'd', long)]
+        #[arg(short = 'd', long = "days")]
         days: Option<f64>,
 
         /// Comment for the claim
-        #[arg(long = "comment")] // NEW: Comment parameter
+        #[arg(short = 'k', long = "comment")] // NEW: Comment parameter
         comment: Option<String>,
 
         /// Skip confirmation prompt
-        #[arg(short = 'y', long)]
+        #[arg(short = 'y', long = "yes")]
         yes: bool,
 
         /// Verbose output
-        #[arg(short = 'v', long)]
+        #[arg(short = 'v', long = "verbose")]
         verbose: bool,
     },
     /// Delete a claim item by ID
     Delete {
         /// Item ID to delete
-        #[arg(short = 'x', long)]
+        #[arg(short = 'x', long = "id")]
         delete_id: String,
 
         /// Skip confirmation prompt
-        #[arg(short = 'y', long)]
+        #[arg(short = 'y', long = "yes")]
         yes: bool,
 
         /// Verbose output
-        #[arg(short = 'v', long)]
+        #[arg(short = 'v', long = "verbose")]
         verbose: bool,
     },
 }
