@@ -555,6 +555,7 @@ fn prompt_for_claim_details() -> Result<(
     println!(" 9 - boh1");
     println!("10 - boh2");
     println!("11 - boh3");
+    println!("12 - boh4");
     print!("\nActivity type (enter number or name, optional - default: billable): ");
     io::stdout().flush()?;
     let mut activity_type = String::new();
@@ -579,6 +580,7 @@ fn prompt_for_claim_details() -> Result<(
                 9 => Some("boh1".to_string()),
                 10 => Some("boh2".to_string()),
                 11 => Some("boh3".to_string()),
+                12 => Some("boh4".to_string()),
                 _ => {
                     println!("Invalid activity type number. Using default 'billable'.");
                     Some("billable".to_string())
@@ -600,6 +602,7 @@ fn prompt_for_claim_details() -> Result<(
                 "boh1" | "9" => Some("boh1".to_string()),
                 "boh2" | "10" => Some("boh2".to_string()),
                 "boh3" | "11" => Some("boh3".to_string()),
+                "boh4" | "12" => Some("boh4".to_string()),
                 _ => {
                     println!(
                         "Unknown activity type '{}'. Using default 'billable'.",
