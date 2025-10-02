@@ -141,9 +141,10 @@ pub fn map_activity_type_to_value(activity_type: &str) -> u8 {
         "holiday" => 6,
         "presales" => 7,
         "illness" => 8,
-        "boh1" => 9,
-        "boh2" => 10,
-        "boh3" => 11,
+        "paid_not_worked" => 9,
+        "intellectual_capital" => 10,
+        "business_development" => 11,
+        "overhead" => 12,
         _ => {
             println!(
                 "Warning: Unknown activity type '{}', defaulting to billable (1)",
@@ -166,9 +167,10 @@ pub fn map_activity_value_to_name(value: u8) -> String {
         6 => "holiday".to_string(),
         7 => "presales".to_string(),
         8 => "illness".to_string(),
-        9 => "boh1".to_string(),
-        10 => "boh2".to_string(),
-        11 => "boh3".to_string(),
+        9 => "paid_not_worked".to_string(),
+        10 => "intellectual_capital".to_string(),
+        11 => "business_development".to_string(),
+        12 => "overhead".to_string(),
         _ => format!("unknown({})", value),
     }
 }

@@ -46,7 +46,7 @@ enum Commands {
         #[arg(short = 'D', long)]
         date: Option<String>,
 
-        /// Activity type (vacation, billable, holding, education, work_reduction, tbd, holiday, presales, illness, boh1, boh2, boh3)
+        /// Activity type (vacation, billable, holding, education, work_reduction, tbd, holiday, presales, illness, paid_not_worked, intellectual_capital, business_development, overhead)
         #[arg(short = 't', long)]
         activity_type: Option<String>,
 
