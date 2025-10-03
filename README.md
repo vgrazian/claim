@@ -297,9 +297,9 @@ claim query -d 5
 
 ### Add Examples
 
-**Add a single claim entry:**
+**Add a single claim entry, include a comment:**
 ```bash
-claim add -D 2025-09-23 -c "CUSTOMER_A" -w "PROJ-123" -H 8
+claim add -D 2025-09-23 -c "CUSTOMER_A" -w "PROJ-123" -k "my comment" -H 8
 ```
 
 **Add multiple days of claims:**
@@ -452,7 +452,10 @@ If you encounter connection errors:
 ## INSTALLATION
 
 ### Prerequisites
-- Rust and Cargo installed on your system
+- Rust and Cargo installed on your system, a linker is also required
+
+### Installing linker on macos
+ install the Xcode Command Line Tools by running `xcode-select --install` in the Terminal. This provides the necessary C/C++ compiler and linker, which Rust uses to build your project. 
 
 ### Building from Source
 ```bash
@@ -488,11 +491,6 @@ chmod +x run_functional_tests.sh
 cargo run
 ```
 
-### Building for Release
-```bash
-cargo build --release
-```
-
 ## PROJECT STRUCTURE
 The project has been refactored into a modular structure:
 
@@ -504,6 +502,7 @@ claim/
 │ ├── monday.rs # Monday.com API client and data structures
 │ ├── query.rs # All query-related functionality
 │ ├── delete.rs # All delete-related functionality
+│ ├── utils.rs # Some mixed utility functions (mostly unused)
 │ └── add.rs # All add-related functionality
 ├── Cargo.toml # Project dependencies and metadata
 └── README.md # This file
@@ -526,7 +525,7 @@ This application connects to Monday.com using your API key to retrieve user info
 - Person column (user assignment)
 - Date column (claim date)
 - Status column (activity type)
-- Text columns (customer, work item)
+- Text columns (customer, work item, comment)
 - Numbers column (hours)
 
 The application automatically handles weekend skipping when adding multiple days and provides comprehensive error handling for API interactions.
@@ -539,6 +538,7 @@ The query command with the `-d` option provides:
 - **Multiple entries per day support** - Handles cases where users have multiple claims on the same date
 - **Total hours calculation** - Automatic sum of hours across the period
 - **Empty day indication** - Shows dates with no entries for complete timeline
+- **Dog walking** - A nice dog walking whle you wait 
 
 ### Activity Type Mapping
 
