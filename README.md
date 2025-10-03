@@ -88,8 +88,8 @@ claim query [--date DATE] [--customer CUSTOMER] [--work-item WORK_ITEM] [--days 
 
 **Options:**
 - `-D, --date DATE`: Date to filter claims (YYYY-MM-DD, YYYY.MM.DD, or YYYY/MM/DD format)
-- `-c, --customer CUSTOMER`: Customer name to filter on
-- `-w, --work-item WORK_ITEM`: Work item to filter on
+- `-c, --customer CUSTOMER`: Customer name to filter on (optional to generate report)
+- `-w, --work-item WORK_ITEM`: Work item to filter on (optional to generate report)
 - `-d, --days DAYS`: Number of working days to query (default: 1, skips weekends)
 - `--limit LIMIT`: Number of rows to display (default: 5)
 - `-v, --verbose`: Verbose output
@@ -142,7 +142,7 @@ claim add [--date DATE] [--activity-type TYPE] [--customer CUSTOMER] [--work-ite
 
 **Options:**
 - `-D, --date DATE`: Date (YYYY-MM-DD format, defaults to today)
-- `-t, --activity-type TYPE`: Activity type: vacation, billable, holding, education, work_reduction, tbd, holiday, presales, illness, boh1, boh2, boh3 (default: billable), the corresponding numerical value can be used
+- `-t, --activity-type TYPE`: Activity type: vacation, billable, holding, education, work_reduction, tbd, holiday, presales, illness, paid_not_worked, intellectual_capital, business_development, overhead (default: billable), the corresponding numerical value can be used (see table at the end, the list is also presented to the user)
 - `-c, --customer CUSTOMER`: Customer name
 - `-w, --work-item WORK_ITEM`: Work item
 - `-k, --comment COMMENT`: Comment
@@ -180,8 +180,8 @@ Year: ####
 === Claim Details ===
 Date: 2025-09-23
 Activity Type: billable (value: 1)
-Customer: CUSTOMER_NAME
-Work Item: WI-12344
+Customer: CUSTOMER NAME
+Work Item: WI.12344
 Hours: 8
 Days requested: 1
 Actual working days: 1
@@ -202,7 +202,7 @@ Creating item for 2025-09-23 (1 of 1)...
 🎉 Successfully created 1 out of 1 items
 
 💡 Equivalent command line:
-   claim add -D 2025-09-23 -c "CUSTOMER_NAME" -w "WI-12344" -H 8
+   claim add -D 2025-09-23 -c "CUSTOMER NAME" -w "WI.12344" -H 8
 ```
 
 ### delete
