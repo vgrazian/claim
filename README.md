@@ -371,9 +371,9 @@ claim query -d 5
 claim add -D 2025-09-23 -c "CUSTOMER_A" -w "PROJ-123" -H 8
 ```
 
-**Add multiple days of claims:**
+**Add multiple days of claims and a comment:**
 ```bash
-claim add -D 2025-09-23 -c "CUSTOMER_B" -w "TASK-456" -H 6 -d 5
+claim add -D 2025-09-23 -c "CUSTOMER_B" -w "TASK-456" -k "a nice comment" -H 6 -d 5
 ```
 
 **Add multiple days of claims (full week if starting with monday) wthout confirmation:**
