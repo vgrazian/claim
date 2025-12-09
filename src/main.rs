@@ -573,7 +573,7 @@ async fn create_items_on_monday(
         }
 
         // Add a small delay to avoid rate limiting
-        time::sleep(time::Duration::from_millis(200)).await;
+        time::sleep(time::Duration::from_millis(1)).await;
     }
 
     println!(

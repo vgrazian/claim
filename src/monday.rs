@@ -399,7 +399,7 @@ impl MondayClient {
             }}
         }}
         "#,
-            board_id, group_id, 50
+            board_id, group_id, 500
         );
 
         if verbose {
@@ -649,7 +649,7 @@ impl MondayClient {
     ) -> Result<Vec<Item>> {
         let mut all_items = Vec::new();
         let mut cursor: Option<String> = None;
-        let page_size = 100;
+        let page_size = 500;
         let mut total_pages = 0;
 
         if verbose {
@@ -740,7 +740,7 @@ impl MondayClient {
                     cursor = Some(next_cursor_val);
 
                     // Add a small delay to avoid rate limiting
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                    tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
                 } else {
                     break;
                 }
@@ -779,7 +779,7 @@ impl MondayClient {
     ) -> Result<Vec<Item>> {
         let mut all_items = Vec::new();
         let mut cursor: Option<String> = None;
-        let page_size = 100;
+        let page_size = 500;
         let mut total_pages = 0;
 
         if verbose {
@@ -873,7 +873,7 @@ impl MondayClient {
                     cursor = Some(next_cursor_val);
 
                     // Add a small delay to avoid rate limiting
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                    tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
                 } else {
                     break;
                 }
@@ -882,9 +882,9 @@ impl MondayClient {
             }
 
             // Safety limit
-            if total_pages > 50 {
+            if total_pages > 100 {
                 if verbose {
-                    println!("Reached safety limit of 50 pages");
+                    println!("Reached safety limit of 100 pages");
                 }
                 break;
             }
