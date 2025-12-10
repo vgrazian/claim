@@ -1,5 +1,8 @@
-use crate::monday::{Board, MondayClient, MondayUser};
-use crate::{calculate_working_dates, map_activity_type_to_value, normalize_date, validate_date};
+use crate::monday::{MondayClient, MondayUser};
+use crate::{
+    calculate_working_dates, get_year_group_id, map_activity_type_to_value, normalize_date,
+    validate_date,
+};
 use anyhow::{anyhow, Result};
 use chrono::prelude::*;
 use serde_json::json;
@@ -297,9 +300,9 @@ async fn create_items_on_monday(
         {
             Ok(item_id) => {
                 if verbose {
-                    println!("✅ Successfully created item with response: {}", item_id);
+                    println!("✅ Successfully created item with ID: {}", item_id);
                 } else {
-                    println!("✅ Successfully created item");
+                    println!("✅ Successfully created item with ID: {}", item_id);
                 }
                 successful_creations += 1;
             }
@@ -418,18 +421,6 @@ mutation {{
 
         println!("{}", mutation);
     }
-}
-
-fn get_year_group_id(board: &Board, year: &str) -> String {
-    if let Some(groups) = &board.groups {
-        for group in groups {
-            if group.title == year {
-                return group.id.clone();
-            }
-        }
-    }
-    // Fallback to a default group ID if not found
-    "new_group_mkkbbd2q".to_string()
 }
 
 fn show_equivalent_command(
@@ -687,10 +678,14 @@ fn prompt_for_claim_details() -> Result<(
 }
 
 // Helper function to normalize activity type input
+// Converts spaces and hyphens to underscores, then handles common variations
+// This ensures inputs like "work reduction", "work-reduction", and "workreduction"
+// all normalize to "work_reduction"
 fn normalize_activity_type_input(input: &str) -> String {
+    // First normalize: lowercase, spaces→underscores, hyphens→underscores
     let normalized = input.to_lowercase().replace(' ', "_").replace('-', "_");
 
-    // Handle common variations
+    // Then handle common variations and aliases
     match normalized.as_str() {
         "work_reduction" | "workreduction" => "work_reduction".to_string(),
         "paid_not_worked" | "paidnotworked" => "paid_not_worked".to_string(),
@@ -705,8 +700,6 @@ fn validate_date_flexible(date_str: &str) -> Result<()> {
     validate_date(date_str)
 }
 
-//  tests ...
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -715,6 +708,8 @@ mod tests {
     #[test]
     fn test_get_year_group_id() {
         let board = Board {
+            id: None,
+            name: None,
             groups: Some(vec![
                 Group {
                     id: "group_2024".to_string(),
@@ -736,7 +731,11 @@ mod tests {
 
     #[test]
     fn test_get_year_group_id_no_groups() {
-        let board = Board { groups: None };
+        let board = Board {
+            id: None,
+            name: None,
+            groups: None,
+        };
 
         assert_eq!(get_year_group_id(&board, "2025"), "new_group_mkkbbd2q");
     }
@@ -800,7 +799,11 @@ mod tests {
         assert!(result.is_ok());
 
         // Test that get_year_group_id returns a string
-        let board = Board { groups: None };
+        let board = Board {
+            id: None,
+            name: None,
+            groups: None,
+        };
         let group_id = get_year_group_id(&board, "2025");
         assert!(!group_id.is_empty());
     }

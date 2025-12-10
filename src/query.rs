@@ -1,7 +1,7 @@
-use crate::monday::{Board, Item, MondayClient, MondayUser};
+use crate::monday::{Item, MondayClient, MondayUser};
 use crate::{
-    calculate_working_dates, map_activity_value_to_name, normalize_date, truncate_string,
-    validate_date,
+    calculate_working_dates, get_year_group_id, map_activity_value_to_name, normalize_date,
+    truncate_string, validate_date,
 };
 use anyhow::Result;
 use chrono::prelude::*;
@@ -629,17 +629,6 @@ async fn stop_walking_dog_animation(handle: tokio::task::JoinHandle<()>) {
 }
 
 // Helper function to get year group ID
-fn get_year_group_id(board: &Board, year: &str) -> String {
-    if let Some(groups) = &board.groups {
-        for group in groups {
-            if group.title == year {
-                return group.id.clone();
-            }
-        }
-    }
-    // Fallback to default group ID
-    "new_group_mkkbbd2q".to_string()
-}
 
 // Improved helper function to check if an item belongs to a user with debugging
 fn is_user_item(item: &Item, user_id: i64, user_name: &str, user_email: &str) -> bool {

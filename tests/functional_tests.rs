@@ -1,5 +1,11 @@
 // Functional tests for the claim application
 // These tests verify the core functionality: add, query, and delete operations
+//
+// Test Cleanup Strategy:
+// Each test uses thread-local storage to track created entries and cleans them up
+// at the end of the test function using cleanup_test_entries(). This approach is
+// preferred over relying on alphabetical test execution order (e.g., "zzz" prefix).
+// Tests can be run in parallel or in any order without cleanup issues.
 
 #[cfg(test)]
 mod functional_tests {
@@ -7,10 +13,11 @@ mod functional_tests {
     use std::path::PathBuf;
     use std::process::Command;
     use std::str;
-    use std::sync::Mutex;
 
-    // Global list to track IDs of entries created during tests
-    static CREATED_ENTRY_IDS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    // Thread-local storage for tracking entry IDs per test
+    thread_local! {
+        static TEST_ENTRY_IDS: std::cell::RefCell<Vec<String>> = std::cell::RefCell::new(Vec::new());
+    }
 
     // Helper function to get the path to the claim binary
     fn get_claim_binary() -> PathBuf {
@@ -85,35 +92,41 @@ mod functional_tests {
         None
     }
 
-    // Cleanup function to delete all DELETE.ME entries
-    // Helper function to track an entry ID created during tests
+    // Helper function to track an entry ID created during tests (thread-local)
     fn track_created_entry(id: String) {
-        if let Ok(mut ids) = CREATED_ENTRY_IDS.lock() {
-            ids.push(id.clone());
-            println!("📝 Tracked entry ID for cleanup: {}", id);
-        }
+        TEST_ENTRY_IDS.with(|ids| {
+            if let Ok(mut ids_mut) = ids.try_borrow_mut() {
+                ids_mut.push(id.clone());
+                println!("📝 Tracked entry ID for cleanup: {}", id);
+            } else {
+                eprintln!("⚠️  Failed to track entry for cleanup: RefCell already borrowed");
+            }
+        });
     }
 
-    fn cleanup_delete_me_entries() {
-        println!("\n🧹 Cleaning up entries created during tests...");
+    // Helper function to get tracked entry IDs for current test
+    fn get_tracked_entry_ids() -> Vec<String> {
+        TEST_ENTRY_IDS.with(|ids| ids.borrow().clone())
+    }
 
-        // Get the list of tracked IDs
-        let ids_to_delete = if let Ok(ids) = CREATED_ENTRY_IDS.lock() {
-            ids.clone()
-        } else {
-            println!("  ❌ Failed to access tracked entry IDs");
-            return;
-        };
+    // Helper function to clear tracked entry IDs for current test
+    fn clear_tracked_entry_ids() {
+        TEST_ENTRY_IDS.with(|ids| ids.borrow_mut().clear());
+    }
 
-        let count = ids_to_delete.len();
-        if count == 0 {
-            println!("  ✅ No entries to clean up");
+    // Helper function to cleanup entries created by the current test
+    fn cleanup_test_entries() {
+        let ids_to_delete = get_tracked_entry_ids();
+
+        if ids_to_delete.is_empty() {
             return;
         }
 
-        println!("  Found {} tracked entries to delete", count);
+        println!(
+            "\n🧹 Cleaning up {} entries created by this test...",
+            ids_to_delete.len()
+        );
 
-        // Delete each tracked entry
         let mut deleted = 0;
         let mut failed = 0;
 
@@ -132,14 +145,10 @@ mod functional_tests {
         }
 
         println!(
-            "\n✅ Cleanup complete: {} deleted, {} failed",
+            "✅ Test cleanup complete: {} deleted, {} failed",
             deleted, failed
         );
-
-        // Clear the tracked IDs
-        if let Ok(mut ids) = CREATED_ENTRY_IDS.lock() {
-            ids.clear();
-        }
+        clear_tracked_entry_ids();
     }
 
     // Test 1: Add an entry with customer name 'TEST' and work item 'DELETE.ME'
@@ -183,7 +192,7 @@ mod functional_tests {
                     track_created_entry(id);
                 }
 
-                println!("✅ Test 1 passed: Entry added successfully");
+                println!("Test 1 passed: Entry added successfully");
             }
             Err(e) => {
                 // The command might fail due to API issues, but that's OK for testing
@@ -194,6 +203,9 @@ mod functional_tests {
                 );
             }
         }
+
+        // Cleanup entries created by this test
+        cleanup_test_entries();
     }
 
     // Test 2: Query current day and extract entry ID
@@ -220,7 +232,7 @@ mod functional_tests {
                 }
 
                 // The test passes as long as the query command runs
-                println!("✅ Test 2 passed: Query command executed successfully");
+                println!("Test 2 passed: Query command executed successfully");
             }
             Err(e) => {
                 // The command might fail due to API issues, but that's OK for testing
@@ -230,6 +242,9 @@ mod functional_tests {
                 );
             }
         }
+
+        // Cleanup entries created by this test
+        cleanup_test_entries();
     }
 
     // Test 3: Delete an entry (this is a template since we need a specific ID)
@@ -245,8 +260,8 @@ mod functional_tests {
         // In a real scenario, we would capture the ID from test_query_current_day
         // For now, we'll demonstrate the pattern and provide instructions
 
-        println!("🧪 Test 3: Delete entry pattern demonstration");
-        println!("💡 To test deletion manually, run: claim delete -x <ENTRY_ID> -y");
+        println!("Test 3: Delete entry pattern demonstration");
+        println!("To test deletion manually, run: claim delete -x <ENTRY_ID> -y");
 
         // We can't automatically test this without a valid ID, but we can verify
         // that the delete command syntax is correct by running with an invalid ID
@@ -255,7 +270,7 @@ mod functional_tests {
         match result {
             Ok((stdout, stderr)) => {
                 // Even with an invalid ID, the command should handle it gracefully
-                println!("✅ Delete command executed (may have failed to find item)");
+                println!("Delete command executed (may have failed to find item)");
                 println!(
                     "   Output: {}",
                     if !stdout.is_empty() { &stdout } else { &stderr }
@@ -271,20 +286,17 @@ mod functional_tests {
         }
     }
 
-    // Test 4: Integrated test that combines all three operations
-    // This test demonstrates the complete workflow
+    // Test 4: Add entry with workflow parameters
     #[test]
-    fn test_complete_workflow() {
+    fn test_add_workflow_entry() {
         // Skip this test in CI environments without proper Monday.com configuration
         if env::var("CI").is_ok() {
-            println!("Skipping test_complete_workflow in CI environment");
+            println!("Skipping test_add_workflow_entry in CI environment");
             return;
         }
 
-        println!("🚀 Starting complete workflow test");
+        println!("🚀 Testing add operation with workflow parameters");
 
-        // Step 1: Add a test entry
-        println!("1. Adding test entry...");
         let add_result = run_claim_command(&[
             "add",
             "-c",
@@ -298,14 +310,79 @@ mod functional_tests {
             "-y",
         ]);
 
-        // Track the created entry ID if successful
+        match add_result {
+            Ok((stdout, stderr)) => {
+                let combined_output = format!("{}\n{}", stdout, stderr);
+                if let Some(id) = extract_entry_id(&combined_output) {
+                    track_created_entry(id);
+                    println!("✅ Add workflow entry test passed!");
+                } else {
+                    println!("⚠️  Could not extract entry ID from output");
+                }
+            }
+            Err(e) => {
+                println!("⚠️  Add operation failed: {}", e);
+            }
+        }
+
+        cleanup_test_entries();
+    }
+
+    // Test 5: Query operation verification
+    #[test]
+    fn test_query_verification() {
+        // Skip this test in CI environments without proper Monday.com configuration
+        if env::var("CI").is_ok() {
+            println!("Skipping test_query_verification in CI environment");
+            return;
+        }
+
+        println!("🚀 Testing query operation");
+
+        let query_result = run_claim_command(&["query", "-d", "1"]);
+
+        match query_result {
+            Ok((stdout, stderr)) => {
+                let output = if !stdout.is_empty() { &stdout } else { &stderr };
+                println!("✅ Query operation completed: {}", output);
+            }
+            Err(e) => {
+                println!("⚠️  Query operation failed: {}", e);
+            }
+        }
+    }
+
+    // Test 6: Delete operation with created entry
+    #[test]
+    fn test_delete_workflow_entry() {
+        // Skip this test in CI environments without proper Monday.com configuration
+        if env::var("CI").is_ok() {
+            println!("Skipping test_delete_workflow_entry in CI environment");
+            return;
+        }
+
+        println!("🚀 Testing delete operation with workflow");
+
+        // First create an entry to delete
+        let add_result = run_claim_command(&[
+            "add",
+            "-c",
+            "TEST",
+            "-w",
+            "DELETE.ME",
+            "-H",
+            "1",
+            "-t",
+            "billable",
+            "-y",
+        ]);
+
         if let Ok((stdout, stderr)) = add_result {
             let combined_output = format!("{}\n{}", stdout, stderr);
             if let Some(id) = extract_entry_id(&combined_output) {
-                track_created_entry(id.clone());
+                println!("Created entry with ID: {}", id);
 
-                // Step 3: Delete the entry immediately (part of workflow test)
-                println!("3. Deleting test entry as part of workflow...");
+                // Now test the delete operation
                 let delete_result = run_claim_command(&["delete", "-x", &id, "-y"]);
 
                 match delete_result {
@@ -314,27 +391,25 @@ mod functional_tests {
                         if output.contains("deleted successfully")
                             || output.contains("Item deleted")
                         {
-                            println!("✅ Complete workflow test passed!");
-                            // Remove from tracking since we deleted it
-                            if let Ok(mut ids) = CREATED_ENTRY_IDS.lock() {
-                                ids.retain(|x| x != &id);
-                            }
+                            println!("✅ Delete workflow entry test passed!");
                         } else {
                             println!("⚠️  Delete may have failed: {}", output);
                         }
                     }
                     Err(e) => {
-                        println!("⚠️  Delete step failed: {}", e);
+                        println!("⚠️  Delete operation failed: {}", e);
+                        // Track for cleanup if delete failed
+                        track_created_entry(id);
                     }
                 }
+            } else {
+                println!("⚠️  Could not extract entry ID for delete test");
             }
         } else {
-            println!("⚠️  Add step may have failed due to API issues");
+            println!("⚠️  Could not create entry for delete test");
         }
 
-        // Step 2: Query to verify (optional)
-        println!("2. Querying to verify...");
-        let _query_result = run_claim_command(&["query", "-d", "1"]);
+        cleanup_test_entries();
     }
 
     // Test 5: Test with verbose output
@@ -434,6 +509,9 @@ mod functional_tests {
                 );
             }
         }
+
+        // Cleanup entries created by this test
+        cleanup_test_entries();
     }
 
     // Test 8: Test query with specific date format
@@ -499,7 +577,7 @@ mod functional_tests {
                 // Track all created entry IDs (multi-day creates multiple entries)
                 let combined_output = format!("{}\n{}", stdout, stderr);
                 for line in combined_output.lines() {
-                    if line.contains("ID:") || line.contains("created item") {
+                    if line.contains("ID:") {
                         if let Some(id) = extract_entry_id(line) {
                             track_created_entry(id);
                         }
@@ -519,6 +597,9 @@ mod functional_tests {
                 );
             }
         }
+
+        // Cleanup entries created by this test
+        cleanup_test_entries();
     }
 
     // Test 10: Test query with limit
@@ -544,17 +625,5 @@ mod functional_tests {
                 );
             }
         }
-    }
-
-    // Test 11: Cleanup test - deletes only tracked entries created during tests
-    #[test]
-    fn test_zzz_cleanup_delete_me() {
-        // Skip this test in CI environments without proper Monday.com configuration
-        if env::var("CI").is_ok() {
-            println!("Skipping cleanup in CI environment");
-            return;
-        }
-
-        cleanup_delete_me_entries();
     }
 }

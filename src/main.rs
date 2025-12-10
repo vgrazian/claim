@@ -87,11 +87,23 @@ enum Commands {
         #[arg(short = 'v', long = "verbose")]
         verbose: bool,
     },
-    /// Delete a claim item by ID
+    /// Delete a claim item by ID or by date + customer + work item
     Delete {
         /// Item ID to delete
         #[arg(short = 'x', long = "id")]
-        delete_id: String,
+        delete_id: Option<String>,
+
+        /// Date to filter claims (YYYY-MM-DD, YYYY.MM.DD, or YYYY/MM/DD format)
+        #[arg(short = 'D', long = "date")]
+        date: Option<String>,
+
+        /// Customer name to filter by
+        #[arg(short = 'c', long = "customer")]
+        customer: Option<String>,
+
+        /// Work item to filter by
+        #[arg(short = 'w', long = "wi")]
+        work_item: Option<String>,
 
         /// Skip confirmation prompt
         #[arg(short = 'y', long = "yes")]
@@ -216,10 +228,24 @@ async fn run(cli: Cli) -> Result<()> {
         }
         Some(Commands::Delete {
             delete_id,
+            date,
+            customer,
+            work_item,
             yes,
             verbose,
         }) => {
-            delete::handle_delete_command(&client, &user, delete_id, yes, verbose).await?;
+            delete::handle_delete_command(
+                &client,
+                &user,
+                &current_year,
+                delete_id,
+                date,
+                customer,
+                work_item,
+                yes,
+                verbose,
+            )
+            .await?;
         }
         None => {
             // Default action when no command is provided
@@ -232,8 +258,8 @@ async fn run(cli: Cli) -> Result<()> {
 
 // Re-export utility functions for use in other modules
 pub use utils::{
-    calculate_working_dates, map_activity_type_to_value, map_activity_value_to_name, mask_api_key,
-    normalize_date, truncate_string, validate_date,
+    calculate_working_dates, get_year_group_id, map_activity_type_to_value,
+    map_activity_value_to_name, mask_api_key, normalize_date, truncate_string, validate_date,
 };
 
 #[cfg(test)]

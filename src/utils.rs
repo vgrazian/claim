@@ -131,6 +131,24 @@ pub fn map_activity_value_to_name(value: u8) -> String {
     }
 }
 
+// ===== MONDAY.COM UTILITIES =====
+
+/// Default group ID used when year-specific group is not found
+const DEFAULT_GROUP_ID: &str = "new_group_mkkbbd2q";
+
+/// Gets the year group ID from a board by matching the year title
+pub fn get_year_group_id(board: &crate::monday::Board, year: &str) -> String {
+    if let Some(groups) = &board.groups {
+        for group in groups {
+            if group.title == year {
+                return group.id.clone();
+            }
+        }
+    }
+    // Fallback to a default group ID if not found
+    DEFAULT_GROUP_ID.to_string()
+}
+
 // ===== ITEM PROCESSING UTILITIES =====
 // (Removed unused utility functions)
 

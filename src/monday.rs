@@ -32,6 +32,10 @@ pub struct MondayUser {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Board {
+    #[serde(skip_serializing)]
+    pub id: Option<String>,
+    #[serde(skip_serializing)]
+    pub name: Option<String>,
     pub groups: Option<Vec<Group>>,
 }
 
@@ -591,11 +595,21 @@ impl MondayClient {
             ));
         }
 
-        // Parse the response to get the created item ID
-        if monday_response.data.is_some() {
-            // The response structure would need to be properly parsed based on the actual API response
-            // For now, we'll return a success message
-            Ok("success".to_string())
+        // Parse the raw response to get the created item ID
+        let json_response: Value = serde_json::from_str(&response)
+            .map_err(|e| anyhow!("Failed to parse response as JSON: {}", e))?;
+
+        if let Some(data) = json_response.get("data") {
+            if let Some(create_item) = data.get("create_item") {
+                if let Some(id) = create_item.get("id") {
+                    if let Some(id_str) = id.as_str() {
+                        return Ok(id_str.to_string());
+                    }
+                }
+            }
+            Err(anyhow!(
+                "Failed to extract item ID from create item response"
+            ))
         } else {
             Err(anyhow!("No data returned from create item mutation"))
         }
@@ -908,7 +922,11 @@ fn manually_parse_response(response: &str) -> Result<MondayResponse, anyhow::Err
     if let Some(data) = value.get("data") {
         if let Some(boards_array) = data.get("boards").and_then(|b| b.as_array()) {
             for board_val in boards_array {
-                let mut board = Board { groups: None };
+                let mut board = Board {
+                    id: None,
+                    name: None,
+                    groups: None,
+                };
 
                 if let Some(groups_array) = board_val.get("groups").and_then(|g| g.as_array()) {
                     let mut groups = Vec::new();
