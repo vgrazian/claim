@@ -31,6 +31,7 @@ cargo run
 ```
 
 **Output:**
+
 ```text
 No API key found. Let's set one up!
 Please enter your API key:
@@ -41,13 +42,14 @@ API key saved successfully!
 ### Getting Your Monday.com API Key
 
 1. Log in to your Monday.com account
-2. Go to https://your-account.monday.com/admin/integrations/api
+2. Go to <https://your-account.monday.com/admin/integrations/api>
 3. Generate a new API key or use an existing one
 4. Copy the API key when prompted by the application
 
 ### API Key Validation
 
 The application validates your API key by:
+
 1. Testing the connection to Monday.com's API
 2. Retrieving your user information (ID, name, email)
 3. Only saving the API key if validation succeeds
@@ -55,6 +57,7 @@ The application validates your API key by:
 ### API Permissions
 
 Your Monday.com API key needs the following permissions:
+
 - Read access to user information
 - Access to the GraphQL API
 
@@ -71,6 +74,7 @@ cargo run
 ```
 
 **Output:**
+
 ```text
 Running for user id *****, user name ***** *****, email ******** for year ####
 No command specified. Use --help for available commands.
@@ -87,6 +91,7 @@ claim query [--date DATE] [--customer CUSTOMER] [--work-item WORK_ITEM] [--days 
 ```
 
 **Options:**
+
 - `-D, --date DATE`: Date to filter claims (YYYY-MM-DD, YYYY.MM.DD, or YYYY/MM/DD format)
 - `-c, --customer CUSTOMER`: Customer name to filter on (optional to generate report)
 - `-w, --work-item WORK_ITEM`: Work item to filter on (optional to generate report)
@@ -95,6 +100,7 @@ claim query [--date DATE] [--customer CUSTOMER] [--work-item WORK_ITEM] [--days 
 - `-v, --verbose`: Verbose output
 
 **Examples:**
+
 ```bash
 # Query a single day
 claim query -D 2025-09-15
@@ -110,6 +116,7 @@ claim query -D 2025-09-15 -c CUST1 -w WI.1001 -d 5
 ```
 
 **Output for multi-day query:**
+
 ```text
 Running for user id *****, user name ***** *****, email ******** for year ####
 
@@ -141,6 +148,7 @@ claim add [--date DATE] [--activity-type TYPE] [--customer CUSTOMER] [--work-ite
 ```
 
 **Options:**
+
 - `-D, --date DATE`: Date (YYYY-MM-DD format, defaults to today)
 - `-t, --activity-type TYPE`: Activity type: vacation, billable, holding, education, work_reduction, tbd, holiday, presales, illness, paid_not_worked, intellectual_capital, business_development, overhead (default: billable), the corresponding numerical value can be used (see table at the end, the list is also presented to the user)
 - `-c, --customer CUSTOMER`: Customer name
@@ -161,6 +169,7 @@ cargo run -- add
 ```
 
 **Output:**
+
 ```text
 Running for user id ***, user name *** ***, email *** for year ####
 
@@ -207,30 +216,48 @@ Creating item for 2025-09-23 (1 of 1)...
 
 ### delete
 
-Delete a claim item by ID.
+Delete a claim item by ID or by matching criteria (date + customer + work item).
 
 ```bash
-claim delete --delete-id ID
+# Delete by ID
+claim delete --id ID [OPTIONS]
+
+# Delete by criteria
+claim delete --date DATE --customer CUSTOMER --work-item WORK_ITEM [OPTIONS]
 ```
 
 **Options:**
-- `-x, --id ID`: **Required** Item ID to delete (find in your query output the correct ID)
+
+- `-x, --id ID`: Item ID to delete (find in your query output)
+- `-D, --date DATE`: Date to filter claims (YYYY-MM-DD, YYYY.MM.DD, or YYYY/MM/DD format)
+- `-c, --customer CUSTOMER`: Customer name to filter by
+- `-w, --wi WORK_ITEM`: Work item to filter by
 - `-y, --yes`: Skip confirmation prompt
 - `-v, --verbose`: Verbose output
 
+**Note:** You must provide either:
+
+1. Item ID (`-x/--id`), OR
+2. All three criteria: Date (`-D/--date`) + Customer (`-c/--customer`) + Work Item (`-w/--wi`)
+
 **Examples:**
+
 ```bash
-# Delete with confirmation
+# Delete by ID with confirmation
 claim delete -x 9971372083
 
-# Delete without confirmation
+# Delete by ID without confirmation
 claim delete -x 9971372083 -y
+
+# Delete by criteria (date + customer + work item)
+claim delete -D 2025-12-10 -c "CUSTOMER_A" -w "PROJ-123" -y
 
 # Delete with verbose output
 claim delete -x 9971372083 -v
 ```
 
 **Output:**
+
 ```text
 Running for user id 51921473, user name John Doe, email john.doe@domain.com for year 2025
 
@@ -261,6 +288,7 @@ y
 
 **Finding Item IDs:**
 To find the ID of an item you want to delete:
+
 1. Run `claim query` to list your claims
 2. Look for the `ID: **********` value in the output
 3. Use that ID with the delete command
@@ -270,26 +298,31 @@ To find the ID of an item you want to delete:
 ### Query Examples
 
 **Query claims for a specific date:**
+
 ```bash
 claim query -D 2025-09-15
 ```
 
 **Query multiple days with weekend skipping:**
+
 ```bash
 claim query -D 2025-09-15 -d 7 # Will show 5 business days skips weekends
 ```
 
 **Query to generate a customer or work item specifi report:**
+
 ```bash
 claim query -D 2025-09-15 -c CUST02 -w WI.1002 -d 7 # Will show 5 business days skips weekends
 ```
 
 **Query with custom limit and verbose output:**
+
 ```bash
 claim query -D 2025-09-01 -d 10 --limit 15 -v
 ```
 
 **Query current week:**
+
 ```bash
 # Assuming today is Monday, query the current work week
 claim query -d 5
@@ -298,43 +331,64 @@ claim query -d 5
 ### Add Examples
 
 **Add a single claim entry, include a comment:**
+
 ```bash
 claim add -D 2025-09-23 -c "CUSTOMER_A" -w "PROJ-123" -k "my comment" -H 8
 ```
 
 **Add multiple days of claims:**
+
 ```bash
 claim add -D 2025-09-23 -c "CUSTOMER_B" -w "TASK-456" -H 6 -d 5
 ```
 
 **Add claim with specific activity type:**
+
 ```bash
 claim add -D 2025-09-23 -t vacation -d 3
 ```
 
 **Add claim non-interactively:**
+
 ```bash
 claim add -D 2025-09-23 -c "CUSTOMER_C" -w "WI-789" -H 4 -y
 ```
 
 **Add claim for today with verbose output:**
+
 ```bash
 claim add -c "CUSTOMER_D" -w "PROJ-999" -H 7 -v
 ```
 
 ### Delete Examples
 
-**Delete a claim with confirmation:**
+**Delete a claim by ID with confirmation:**
+
 ```bash
 claim delete -x 9971372083
 ```
 
-**Delete a claim without confirmation:**
+**Delete a claim by ID without confirmation:**
+
 ```bash
 claim delete -x 9971372083 -y
 ```
 
+**Delete by criteria (date + customer + work item):**
+
+```bash
+claim delete -D 2025-12-10 -c "CUSTOMER_A" -w "PROJ-123" -y
+```
+
+**Delete multiple matching entries by criteria:**
+
+```bash
+# This will find and delete all entries matching the criteria
+claim delete -D 2025-12-10 -c "TEST" -w "DELETE.ME" -y
+```
+
 **Delete with verbose output to see details:**
+
 ```bash
 claim delete -x 9971372083 -v
 ```
@@ -344,21 +398,25 @@ claim delete -x 9971372083 -v
 ### Query Examples
 
 **Query claims for a specific date:**
+
 ```bash
 claim query -D 2025-09-15
 ```
 
 **Query multiple days with weekend skipping:**
+
 ```bash
 claim query -D 2025-09-15 -d 7  # Will show 5 business days (skips weekends)
 ```
 
 **Query with custom limit and verbose output:**
+
 ```bash
 claim query -D 2025-09-01 -d 10 --limit 15 -v
 ```
 
 **Query current week:**
+
 ```bash
 # Assuming today is Monday, query the current work week
 claim query -d 5
@@ -367,31 +425,37 @@ claim query -d 5
 ### Add Examples
 
 **Add a single claim entry:**
+
 ```bash
 claim add -D 2025-09-23 -c "CUSTOMER_A" -w "PROJ-123" -H 8
 ```
 
 **Add multiple days of claims and a comment:**
+
 ```bash
 claim add -D 2025-09-23 -c "CUSTOMER_B" -w "TASK-456" -k "a nice comment" -H 6 -d 5
 ```
 
 **Add multiple days of claims (full week if starting with monday) wthout confirmation:**
+
 ```bash
 claim add -D 2025-09-23 -c "CUSTOMER_B" -w "WI-456" -H 8 -d 5 -y
 ```
 
 **Add claim with specific activity type:**
+
 ```bash
 claim add -D 2025-09-23 -t vacation -d 3
 ```
 
 **Add claim non-interactively:**
+
 ```bash
 claim add -D 2025-09-23 -c "CUSTOMER_C" -w "WI-789" -H 4 -y
 ```
 
 **Add claim for today with verbose output:**
+
 ```bash
 claim add -c "CUSTOMER_D" -w "PROJ-999" -H 7 -v
 ```
@@ -399,16 +463,19 @@ claim add -c "CUSTOMER_D" -w "PROJ-999" -H 7 -v
 ### Delete Examples
 
 **Delete a claim with confirmation:**
+
 ```bash
 claim delete -x 9971372083
 ```
 
 **Delete a claim without confirmation:**
+
 ```bash
 claim delete -x 9971372083 -y
 ```
 
 **Delete with verbose output to see details:**
+
 ```bash
 claim delete -x 9971372083 -v
 ```
@@ -418,16 +485,19 @@ claim delete -x 9971372083 -v
 The API key is stored in a JSON configuration file. The location varies by operating system:
 
 ### Linux
+
 ```
 ~/.config/claim/config.json
 ```
 
 ### macOS
+
 ```
 ~/Library/Application Support/com.yourname.claim/config.json
 ```
 
 ### Windows
+
 ```
 C:UsersUsernameAppDataRoamingyournameclaimconfigconfig.json
 ```
@@ -443,6 +513,7 @@ C:UsersUsernameAppDataRoamingyournameclaimconfigconfig.json
 ## ERROR HANDLING
 
 If you encounter connection errors:
+
 1. Verify your API key is correct
 2. Check your internet connection
 3. Ensure your Monday.com account is active
@@ -452,12 +523,15 @@ If you encounter connection errors:
 ## INSTALLATION
 
 ### Prerequisites
+
 - Rust and Cargo installed on your system, a linker is also required
 
 ### Installing linker on macos
- install the Xcode Command Line Tools by running `xcode-select --install` in the Terminal. This provides the necessary C/C++ compiler and linker, which Rust uses to build your project. 
+
+ install the Xcode Command Line Tools by running `xcode-select --install` in the Terminal. This provides the necessary C/C++ compiler and linker, which Rust uses to build your project.
 
 ### Building from Source
+
 ```bash
 git clone https://github.com/vgrazian/claim.git
 cd claim
@@ -468,30 +542,35 @@ The binary will be available at `./target/release/claim`
 
 ## DEVELOPMENT
 
-
 ### Running Tests
+
 ```bash
 cargo test
 ```
 
 How to run the functional tests:
+
 ```bash
 cargo test --test functional_tests
 ```
-NOTE: the last step is manual, you need to get the ID and delete it using the suggested command.
+
+NOTE: Functional tests now automatically track and cleanup all created entries. No manual cleanup is required.
 
 Or run the specific demonstration script
+
 ```bash
 chmod +x run_functional_tests.sh
 ./run_functional_tests.sh
 ```
 
 ### Running in Debug Mode
+
 ```bash
 cargo run
 ```
 
 ## PROJECT STRUCTURE
+
 The project has been refactored into a modular structure:
 
 ```
@@ -522,6 +601,7 @@ claim/
 ## Monday.com Integration
 
 This application connects to Monday.com using your API key to retrieve user information and verify authentication. It specifically works with boards that have the following column structure:
+
 - Person column (user assignment)
 - Date column (claim date)
 - Status column (activity type)
@@ -533,12 +613,13 @@ The application automatically handles weekend skipping when adding multiple days
 ### Multi-Day Query Features
 
 The query command with the `-d` option provides:
+
 - **Automatic weekend skipping** - Only business days are included in the range
 - **Simplified table view** - Clean summary format for multiple days
 - **Multiple entries per day support** - Handles cases where users have multiple claims on the same date
 - **Total hours calculation** - Automatic sum of hours across the period
 - **Empty day indication** - Shows dates with no entries for complete timeline
-- **Dog walking** - A nice dog walking whle you wait 
+- **Dog walking** - A nice dog walking whle you wait
 
 ### Activity Type Mapping
 
@@ -563,10 +644,12 @@ The application maps between human-readable activity types and their correspondi
 Pls be patient, Readme is rarely up to date
 
 As you got down here you can pet Virgilio the cat:
+
 ~~~ text
  _._     _,-'""`-._
 (,-.`._,'(       |\`-/|
     `-.-' \ )-`( , o o)
           `-    \`_`"'-
 ~~~
+
 purr purrr...
