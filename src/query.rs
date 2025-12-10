@@ -243,24 +243,18 @@ pub async fn handle_query_command(
         filtered_items.retain(|item| {
             let mut matches = true;
 
-            // Apply customer filter
+            // Apply customer filter (exact match, case-insensitive)
             if let Some(ref customer_filter) = customer {
                 let item_customer = extract_column_value(item, "text__1");
-                if !item_customer
-                    .to_lowercase()
-                    .contains(&customer_filter.to_lowercase())
-                {
+                if item_customer.to_lowercase() != customer_filter.to_lowercase() {
                     matches = false;
                 }
             }
 
-            // Apply work item filter
+            // Apply work item filter (exact match, case-insensitive)
             if let Some(ref work_item_filter) = work_item {
                 let item_work_item = extract_column_value(item, "text8__1");
-                if !item_work_item
-                    .to_lowercase()
-                    .contains(&work_item_filter.to_lowercase())
-                {
+                if item_work_item.to_lowercase() != work_item_filter.to_lowercase() {
                     matches = false;
                 }
             }

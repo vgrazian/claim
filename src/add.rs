@@ -692,15 +692,11 @@ fn normalize_activity_type_input(input: &str) -> String {
 
     // Handle common variations
     match normalized.as_str() {
-        "work_reduction" | "workreduction" | "work reduction" => "work_reduction".to_string(),
-        "paid_not_worked" | "paidnotworked" | "paid not worked" => "paid_not_worked".to_string(),
-        "intellectual_capital" | "intellectualcapital" | "intellectual capital" => {
-            "intellectual_capital".to_string()
-        }
-        "business_development" | "businessdevelopment" | "business development" => {
-            "business_development".to_string()
-        }
-        "overhead" | "over head" | "over-head" => "overhead".to_string(),
+        "work_reduction" | "workreduction" => "work_reduction".to_string(),
+        "paid_not_worked" | "paidnotworked" => "paid_not_worked".to_string(),
+        "intellectual_capital" | "intellectualcapital" => "intellectual_capital".to_string(),
+        "business_development" | "businessdevelopment" => "business_development".to_string(),
+        "overhead" | "over_head" => "overhead".to_string(),
         _ => normalized,
     }
 }
@@ -719,8 +715,6 @@ mod tests {
     #[test]
     fn test_get_year_group_id() {
         let board = Board {
-            id: "test_board".to_string(),
-            name: "Test Board".to_string(),
             groups: Some(vec![
                 Group {
                     id: "group_2024".to_string(),
@@ -742,11 +736,7 @@ mod tests {
 
     #[test]
     fn test_get_year_group_id_no_groups() {
-        let board = Board {
-            id: "test_board".to_string(),
-            name: "Test Board".to_string(),
-            groups: None,
-        };
+        let board = Board { groups: None };
 
         assert_eq!(get_year_group_id(&board, "2025"), "new_group_mkkbbd2q");
     }
@@ -810,11 +800,7 @@ mod tests {
         assert!(result.is_ok());
 
         // Test that get_year_group_id returns a string
-        let board = Board {
-            id: "test".to_string(),
-            name: "test".to_string(),
-            groups: None,
-        };
+        let board = Board { groups: None };
         let group_id = get_year_group_id(&board, "2025");
         assert!(!group_id.is_empty());
     }

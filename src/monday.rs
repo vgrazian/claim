@@ -20,14 +20,6 @@ struct MondayData {
     me: Option<MondayUser>,
     boards: Option<Vec<Board>>,
     items: Option<Vec<Item>>,
-    #[serde(flatten)]
-    extra_fields: std::collections::HashMap<String, serde_json::Value>,
-}
-
-impl MondayData {
-    fn get_custom_field(&self, field_name: &str) -> Option<&serde_json::Value> {
-        self.extra_fields.get(field_name)
-    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -40,9 +32,6 @@ pub struct MondayUser {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Board {
-    #[serde(deserialize_with = "deserialize_string_id")]
-    pub id: String,
-    pub name: String,
     pub groups: Option<Vec<Group>>,
 }
 
@@ -231,10 +220,6 @@ impl MondayClient {
         }
     }
 
-    pub async fn get_current_user(&self) -> Result<MondayUser> {
-        self.get_current_user_verbose(false).await
-    }
-
     pub async fn get_current_user_verbose(&self, verbose: bool) -> Result<MondayUser> {
         let query = r#"
         {
@@ -283,17 +268,6 @@ impl MondayClient {
             .data
             .and_then(|data| data.me)
             .ok_or_else(|| anyhow!("No user data found in response"))
-    }
-
-    pub async fn query_board(
-        &self,
-        board_id: &str,
-        group_name: &str,
-        user_id: i64,
-        limit: usize,
-    ) -> Result<Board> {
-        self.query_board_verbose(board_id, group_name, user_id, limit, false)
-            .await
     }
 
     pub async fn query_board_verbose(
@@ -561,17 +535,6 @@ impl MondayClient {
         Ok(board)
     }
 
-    pub async fn create_item(
-        &self,
-        board_id: &str,
-        group_id: &str,
-        item_name: &str,
-        column_values: &serde_json::Value,
-    ) -> Result<String> {
-        self.create_item_verbose(board_id, group_id, item_name, column_values, false)
-            .await
-    }
-
     pub async fn create_item_verbose(
         &self,
         board_id: &str,
@@ -636,137 +599,6 @@ impl MondayClient {
         } else {
             Err(anyhow!("No data returned from create item mutation"))
         }
-    }
-
-    // Fixed pagination logic for user name queries
-    pub async fn query_items_by_user_name(
-        &self,
-        board_id: &str,
-        group_id: &str,
-        user_name: &str,
-        limit: usize,
-        verbose: bool,
-    ) -> Result<Vec<Item>> {
-        let mut all_items = Vec::new();
-        let mut cursor: Option<String> = None;
-        let page_size = 500;
-        let mut total_pages = 0;
-
-        if verbose {
-            println!("Starting paginated query for user '{}'", user_name);
-        }
-
-        loop {
-            total_pages += 1;
-
-            // Build the query with proper cursor handling
-            let query = if let Some(cursor_str) = &cursor {
-                format!(
-                    r#"
-                    {{
-                        boards(ids: ["{}"]) {{
-                            groups(ids: ["{}"]) {{
-                                items_page(limit: {}, query_params: {{rules: [{{column_id: "name", compare_value: ["{}"]}}]}}, cursor: "{}") {{
-                                    cursor
-                                    items {{
-                                        id
-                                        name
-                                        column_values {{
-                                            id
-                                            value
-                                            text
-                                        }}
-                                    }}
-                                }}
-                            }}
-                        }}
-                    }}
-                    "#,
-                    board_id, group_id, page_size, user_name, cursor_str
-                )
-            } else {
-                format!(
-                    r#"
-                    {{
-                        boards(ids: ["{}"]) {{
-                            groups(ids: ["{}"]) {{
-                                items_page(limit: {}, query_params: {{rules: [{{column_id: "name", compare_value: ["{}"]}}]}}) {{
-                                    cursor
-                                    items {{
-                                        id
-                                        name
-                                        column_values {{
-                                            id
-                                            value
-                                            text
-                                        }}
-                                    }}
-                                }}
-                            }}
-                        }}
-                    }}
-                    "#,
-                    board_id, group_id, page_size, user_name
-                )
-            };
-
-            if verbose {
-                println!(
-                    "Sending paginated user name query (page {}, cursor: {:?})",
-                    total_pages, cursor
-                );
-            }
-
-            let request_body = MondayRequest { query };
-            let response = self.send_request(request_body, verbose).await?;
-
-            // Parse the response
-            let value: Value = serde_json::from_str(&response)
-                .map_err(|e| anyhow!("Failed to parse JSON response: {}", e))?;
-
-            // Extract items and cursor
-            let (page_items, next_cursor) = extract_items_from_response(&value)
-                .map_err(|e| anyhow!("Failed to extract items from response: {}", e))?;
-
-            if verbose {
-                println!("Page {}: Extracted {} items", total_pages, page_items.len());
-            }
-
-            all_items.extend(page_items);
-
-            // Check if we have more pages or reached the limit
-            if let Some(next_cursor_val) = next_cursor {
-                if !next_cursor_val.is_empty() && all_items.len() < limit {
-                    cursor = Some(next_cursor_val);
-
-                    // Add a small delay to avoid rate limiting
-                    tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
-                } else {
-                    break;
-                }
-            } else {
-                break;
-            }
-
-            // Safety limit
-            if total_pages > 20 {
-                if verbose {
-                    println!("Reached safety limit of 20 pages");
-                }
-                break;
-            }
-        }
-
-        if verbose {
-            println!("Total items collected: {}", all_items.len());
-        }
-
-        // Limit the final result
-        if all_items.len() > limit {
-            all_items.truncate(limit);
-        }
-
-        Ok(all_items)
     }
 
     // Method to query ALL items in a group (without user filtering)
@@ -1062,11 +894,6 @@ impl MondayClient {
             .map_err(|e| anyhow!("Failed to read response text: {}", e))
     }
 
-    pub async fn test_connection(&self) -> Result<()> {
-        self.get_current_user().await?;
-        Ok(())
-    }
-
     pub async fn test_connection_verbose(&self, verbose: bool) -> Result<()> {
         self.get_current_user_verbose(verbose).await?;
         Ok(())
@@ -1081,22 +908,7 @@ fn manually_parse_response(response: &str) -> Result<MondayResponse, anyhow::Err
     if let Some(data) = value.get("data") {
         if let Some(boards_array) = data.get("boards").and_then(|b| b.as_array()) {
             for board_val in boards_array {
-                let board_id = board_val
-                    .get("id")
-                    .and_then(|id| id.as_str())
-                    .unwrap_or("unknown")
-                    .to_string();
-                let board_name = board_val
-                    .get("name")
-                    .and_then(|name| name.as_str())
-                    .unwrap_or("unknown")
-                    .to_string();
-
-                let mut board = Board {
-                    id: board_id,
-                    name: board_name,
-                    groups: None,
-                };
+                let mut board = Board { groups: None };
 
                 if let Some(groups_array) = board_val.get("groups").and_then(|g| g.as_array()) {
                     let mut groups = Vec::new();
@@ -1198,7 +1010,6 @@ fn manually_parse_response(response: &str) -> Result<MondayResponse, anyhow::Err
             me: None,
             boards: Some(boards),
             items: None,
-            extra_fields: std::collections::HashMap::new(),
         }),
         errors: Vec::new(),
     })
