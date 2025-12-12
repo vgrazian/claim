@@ -800,10 +800,10 @@ impl MondayClient {
                             items {{
                                 id
                                 name
-                                column_values(ids: ["person", "date4"]) {{
-                                    id
-                                    text
-                                    value
+                            column_values {{
+                                id
+                                value
+                                text
                                 }}
                             }}
                         }}
