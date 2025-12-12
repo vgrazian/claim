@@ -3,4 +3,4 @@
 **/*.rs.bk
 /note.md
 /.DS_Store
-.vscode
+.vscode/

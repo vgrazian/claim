@@ -5,6 +5,7 @@ mod monday;
 mod query;
 mod selenium;
 mod time;
+mod ui;
 mod utils;
 
 use anyhow::{anyhow, Result};
@@ -49,6 +50,8 @@ enum Commands {
         #[arg(short = 'v', long = "verbose")]
         verbose: bool,
     },
+    /// Launch TUI to view claims by business week
+    Tui,
     /// Add a new claim
     Add {
         /// Date (YYYY-MM-DD format)
@@ -134,6 +137,7 @@ async fn run(cli: Cli) -> Result<()> {
         Some(Commands::Query { verbose, .. }) => *verbose,
         Some(Commands::Add { verbose, .. }) => *verbose,
         Some(Commands::Delete { verbose, .. }) => *verbose,
+        Some(Commands::Tui) => false,
         None => false,
     };
 
@@ -246,6 +250,9 @@ async fn run(cli: Cli) -> Result<()> {
                 verbose,
             )
             .await?;
+        }
+        Some(Commands::Tui) => {
+            ui::run_tui(&client, &user).await?;
         }
         None => {
             // Default action when no command is provided
