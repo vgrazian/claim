@@ -68,6 +68,33 @@ pub async fn handle_add_command(
     let activity_type_value = map_activity_type_to_value(&activity_type_str);
     let days_value = final_days.unwrap_or(1.0);
 
+    // Automatically set work item based on activity type if not provided
+    let final_work_item = if final_work_item.is_none() {
+        match activity_type_str.as_str() {
+            "vacation" | "illness" | "holiday" | "work_reduction" => {
+                if verbose {
+                    println!(
+                        "Auto-setting work item to M.00556 for activity type: {}",
+                        activity_type_str
+                    );
+                }
+                Some("M.00556".to_string())
+            }
+            "intellectual_capital" | "education" => {
+                if verbose {
+                    println!(
+                        "Auto-setting work item to M.00563 for activity type: {}",
+                        activity_type_str
+                    );
+                }
+                Some("M.00563".to_string())
+            }
+            _ => final_work_item,
+        }
+    } else {
+        final_work_item
+    };
+
     let start_date = chrono::NaiveDate::parse_from_str(&final_date, "%Y-%m-%d")?;
     let target_days = days_value as i64;
     let actual_dates = calculate_working_dates(start_date, target_days);
@@ -162,7 +189,7 @@ pub async fn handle_add_command(
         &actual_dates,
         activity_type_value,
         &final_customer,
-        &final_work_item,
+        &final_work_item, // Now using the auto-set work item
         &final_comment,
         final_hours,
         user.id,

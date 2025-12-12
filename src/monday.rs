@@ -748,6 +748,101 @@ impl MondayClient {
         Ok(all_items)
     }
 
+    // Method to query items with server-side filtering by user and dates
+    pub async fn query_items_with_filters(
+        &self,
+        board_id: &str,
+        group_id: &str,
+        user_id: i64,
+        dates: &[String],
+        limit: usize,
+        verbose: bool,
+    ) -> Result<Vec<Item>> {
+        if verbose {
+            println!(
+                "Querying items with server-side filters: user_id={}, dates={:?}",
+                user_id, dates
+            );
+        }
+
+        // Build the date compare_value array
+        let date_values: Vec<String> = dates
+            .iter()
+            .flat_map(|date| vec!["EXACT".to_string(), date.clone()])
+            .collect();
+        let date_values_json = serde_json::to_string(&date_values)?;
+
+        // Build the query with server-side filtering
+        let query = format!(
+            r#"
+            {{
+                boards(ids: ["{}"]) {{
+                    groups(ids: ["{}"]) {{
+                        items_page(
+                            limit: {}
+                            query_params: {{
+                                rules: [
+                                    {{
+                                        column_id: "person"
+                                        compare_value: ["person-{}"]
+                                        operator: any_of
+                                    }},
+                                    {{
+                                        column_id: "date4"
+                                        compare_value: {}
+                                        operator: any_of
+                                    }}
+                                ]
+                                operator: and
+                            }}
+                        ) {{
+                            cursor
+                            items {{
+                                id
+                                name
+                            column_values {{
+                                id
+                                value
+                                text
+                                }}
+                            }}
+                        }}
+                    }}
+                }}
+            }}
+            "#,
+            board_id, group_id, limit, user_id, date_values_json
+        );
+
+        if verbose {
+            println!("Sending server-side filtered query:\n{}", query);
+        }
+
+        let request_body = MondayRequest { query };
+        let response = self.send_request(request_body, verbose).await?;
+
+        if verbose {
+            println!(
+                "Response: {}",
+                &response[..500.min(response.len())]
+            );
+        }
+
+        // Parse the response
+        let value: Value = serde_json::from_str(&response)
+            .map_err(|e| anyhow!("Failed to parse JSON response: {}", e))?;
+
+        // Extract items
+        let (items, _cursor) = extract_items_from_response(&value)
+            .map_err(|e| anyhow!("Failed to extract items from response: {}", e))?;
+
+        if verbose {
+            println!("Extracted {} items with server-side filtering", items.len());
+        }
+
+        Ok(items)
+    }
+
     // NEW METHOD: Get an item by its ID
     pub async fn get_item_by_id(&self, item_id: &str, verbose: bool) -> Result<Option<Item>> {
         let query = format!(

@@ -1,0 +1,66 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug UI",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "run",
+                    "--",
+                    "ui"
+                ]
+            },
+            "args": []
+        },
+        {
+            "name": "Debug executable 'query'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "run",
+                    "--", "query", "-D", "2025-12-05"
+                ]
+            },
+            "args": []
+        },
+        {
+            "name": "Debug unit tests in executable 'claim'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--bin=claim"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'functional_tests'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=functional_tests"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'integration_tests'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=integration_tests"
+                ]
+            }
+        }
+    ]
+}
