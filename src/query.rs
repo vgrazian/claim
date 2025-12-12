@@ -135,19 +135,26 @@ pub async fn handle_query_command(
         .collect();
 
     // Use server-side filtering to get items
+    // For multi-day queries, use a high limit to get all items
+    // For single-day queries, respect the user's limit
+    let api_limit = if target_days > 1 { 500 } else { limit };
+
     let filtered_items = client
         .query_items_with_filters(
             board_id,
             &group_id,
             user.id,
             &date_strings,
-            limit,
+            api_limit,
             verbose,
         )
         .await?;
 
     if verbose {
-        println!("\n=== Server-side filtered items: {} ===", filtered_items.len());
+        println!(
+            "\n=== Server-side filtered items: {} ===",
+            filtered_items.len()
+        );
     }
 
     // Stop the animation if it's running
@@ -226,7 +233,7 @@ pub async fn handle_query_command(
                 ));
             } else {
                 filter_info.push(format!("date: {}", _start_date_val.format("%Y-%m-%d")));
-                }
+            }
         }
         if let Some(c) = &customer {
             filter_info.push(format!("customer: {}", c));
