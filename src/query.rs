@@ -108,119 +108,42 @@ pub async fn handle_query_command(
         }
     }
 
-    // FIXED: Start the dog walking animation for both single-day and multi-day queries
+    // Start the dog walking animation
     let animation_handle = if !verbose && start_date.is_some() {
         Some(start_walking_dog_animation())
     } else {
         None
     };
 
-    // First, get the current year's group ID
+    // Get the current year's group ID
     let current_year = get_current_year().to_string();
     let board = client.get_board_with_groups(board_id, verbose).await?;
-
     let group_id = get_year_group_id(&board, &current_year);
 
     if verbose {
         println!("Using group ID: {} for year: {}", group_id, current_year);
     }
 
-    // Search in current year group first
-    let mut all_items = Vec::new();
-    let mut warning_message = None;
+    // Convert date_range to strings for the query
+    let date_strings: Vec<String> = date_range
+        .iter()
+        .map(|d| d.format("%Y-%m-%d").to_string())
+        .collect();
+
+    // Use server-side filtering to get items
+    let filtered_items = client
+        .query_items_with_filters(
+            board_id,
+            &group_id,
+            user.id,
+            &date_strings,
+            limit,
+            verbose,
+        )
+        .await?;
 
     if verbose {
-        println!(
-            "Found {} groups on board:",
-            board.groups.as_ref().map_or(0, |g| g.len())
-        );
-        if let Some(groups) = &board.groups {
-            for group in groups {
-                println!("  - {} (ID: {})", group.title, group.id);
-            }
-        }
-    }
-
-    // Search in current year group first
-    if let Some(groups) = &board.groups {
-        if let Some(current_group) = groups.iter().find(|g| g.title == current_year) {
-            if verbose {
-                println!("\n🔍 Searching in current year group: {}", current_year);
-            }
-
-            let items = client
-                .query_all_items_in_group(board_id, &current_group.id, 5000, verbose)
-                .await?;
-
-            let user_items: Vec<Item> = items
-                .into_iter()
-                .filter(|item| is_user_item(item, user.id, &user.name, &user.email))
-                .collect();
-
-            if !user_items.is_empty() {
-                let user_items_len = user_items.len();
-                all_items.extend(user_items);
-                if verbose {
-                    println!("✅ Found {} items in current year group", user_items_len);
-                }
-            } else {
-                if verbose {
-                    println!("❌ No items found in current year group");
-                }
-            }
-        }
-    }
-
-    // If no items found in current group, search other groups
-    if all_items.is_empty() {
-        if verbose {
-            println!("\n🔍 No items found in current year, searching all groups...");
-        }
-
-        if let Some(groups) = &board.groups {
-            for group in groups {
-                if group.title != current_year {
-                    if verbose {
-                        println!("  Searching in group: {}", group.title);
-                    }
-
-                    let items = client
-                        .query_all_items_in_group(board_id, &group.id, 5000, verbose)
-                        .await?;
-
-                    let user_items: Vec<Item> = items
-                        .into_iter()
-                        .filter(|item| is_user_item(item, user.id, &user.name, &user.email))
-                        .collect();
-
-                    if !user_items.is_empty() {
-                        let user_items_len = user_items.len();
-                        all_items.extend(user_items);
-                        if verbose {
-                            println!(
-                                "    Found {} items in group {}",
-                                user_items_len, group.title
-                            );
-                        }
-                    }
-                }
-            }
-        }
-
-        // Set warning if we found items in other groups but not in current group
-        if !all_items.is_empty() {
-            warning_message = Some(format!(
-                "⚠️  WARNING: No claims found for current year ({}). Showing results from other years.",
-                current_year
-            ));
-        }
-    }
-
-    if verbose {
-        println!(
-            "\n=== Raw items found across all groups: {} ===",
-            all_items.len()
-        );
+        println!("\n=== Server-side filtered items: {} ===", filtered_items.len());
     }
 
     // Stop the animation if it's running
@@ -228,104 +151,18 @@ pub async fn handle_query_command(
         stop_walking_dog_animation(handle).await;
     }
 
-    // Store a clone of all_items for later use in the "no entries today" message
-    let all_items_clone = all_items.clone();
-
-    // NEW: Apply customer and work item filters
-    let mut filtered_items = all_items;
-
-    if customer.is_some() || work_item.is_some() {
-        if verbose {
-            println!("\n🔍 Applying customer and work item filters...");
-        }
-
-        let original_count = filtered_items.len();
-        filtered_items.retain(|item| {
-            let mut matches = true;
-
-            // Apply customer filter (exact match, case-insensitive)
-            if let Some(ref customer_filter) = customer {
-                let item_customer = extract_column_value(item, "text__1");
-                if item_customer.to_lowercase() != customer_filter.to_lowercase() {
-                    matches = false;
-                }
-            }
-
-            // Apply work item filter (exact match, case-insensitive)
-            if let Some(ref work_item_filter) = work_item {
-                let item_work_item = extract_column_value(item, "text8__1");
-                if item_work_item.to_lowercase() != work_item_filter.to_lowercase() {
-                    matches = false;
-                }
-            }
-
-            matches
-        });
-
-        if verbose {
-            println!(
-                "   Filtered from {} to {} items",
-                original_count,
-                filtered_items.len()
-            );
-        }
-    }
-
-    // Then filter by date range if date filter is provided
-    let (filtered_items, has_exact_matches) = if start_date.is_some() && !date_range.is_empty() {
-        let (exact_matches, non_matching_items): (Vec<Item>, Vec<Item>) = filtered_items
-            .into_iter()
-            .partition(|item| is_item_matching_date_range(item, &date_range));
-
-        let has_exact = !exact_matches.is_empty();
-
-        // For single-day queries, if no exact matches but we have other items, show the closest ones
-        if target_days == 1 && exact_matches.is_empty() && !non_matching_items.is_empty() {
-            // Find items with dates closest to the target date
-            let mut items_with_dates: Vec<(Item, NaiveDate)> = non_matching_items
-                .into_iter()
-                .filter_map(|item| {
-                    extract_item_date(&item)
-                        .and_then(|date_str| {
-                            chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d").ok()
-                        })
-                        .map(|date| (item, date))
-                })
-                .collect();
-
-            // Sort by proximity to target date
-            if let Some(target_date) = start_date {
-                items_with_dates.sort_by(|a, b| {
-                    let diff_a = (a.1 - target_date).num_days().abs();
-                    let diff_b = (b.1 - target_date).num_days().abs();
-                    diff_a.cmp(&diff_b)
-                });
-
-                // Take the closest 3 items
-                let closest_items: Vec<Item> = items_with_dates
-                    .into_iter()
-                    .take(3)
-                    .map(|(item, _)| item)
-                    .collect();
-
-                (closest_items, false)
-            } else {
-                (exact_matches, has_exact)
-            }
-        } else {
-            (exact_matches, has_exact)
-        }
+    // Determine if we have exact matches
+    let has_exact_matches = if !date_range.is_empty() {
+        filtered_items
+            .iter()
+            .any(|item| is_item_matching_date_range(item, &date_range))
     } else {
-        (filtered_items, true) // If no date filter, consider all items as "matching"
+        true
     };
 
+    // For display purposes
     let limited_items: Vec<Item> = filtered_items.iter().take(limit).cloned().collect();
     let filtered_items_len = filtered_items.len();
-
-    // Display warning if applicable
-    if let Some(warning) = warning_message {
-        println!("\n{}", warning);
-    }
 
     // Display the results
     if !filtered_items.is_empty() {
@@ -338,7 +175,7 @@ pub async fn handle_query_command(
                     &user.name,
                     verbose,
                     has_exact_matches,
-                    customer.is_some() || work_item.is_some(), // NEW: Pass whether filters are active
+                    false,
                 );
             } else {
                 // Single day query - show detailed format
@@ -349,8 +186,8 @@ pub async fn handle_query_command(
                     filtered_items_len,
                     limit,
                     has_exact_matches,
-                    &customer,  // NEW: Pass customer filter
-                    &work_item, // NEW: Pass work item filter
+                    &customer,
+                    &work_item,
                 );
             }
         } else {
@@ -362,14 +199,14 @@ pub async fn handle_query_command(
                 filtered_items_len,
                 limit,
                 true,
-                &customer,  // NEW: Pass customer filter
-                &work_item, // NEW: Pass work item filter
+                &customer,
+                &work_item,
             );
         }
     } else {
         println!("\nNo items found for user '{}'", user.name);
 
-        // NEW: Show applied filters in the "no results" message
+        // Show applied filters in the "no results" message
         let mut filter_info = Vec::new();
         if let Some(_start_date_val) = start_date {
             if target_days > 1 {
@@ -385,7 +222,7 @@ pub async fn handle_query_command(
                 ));
             } else {
                 filter_info.push(format!("date: {}", _start_date_val.format("%Y-%m-%d")));
-            }
+                }
         }
         if let Some(c) = &customer {
             filter_info.push(format!("customer: {}", c));
@@ -397,68 +234,9 @@ pub async fn handle_query_command(
         if !filter_info.is_empty() {
             println!("Filters: {}", filter_info.join(", "));
         }
-
-        // Special handling for "no entries today, but entries exist later" case
-        if let Some(query_date) = start_date {
-            if target_days == 1 && filtered_items.is_empty() && !all_items_clone.is_empty() {
-                // Find the next available date after today
-                let future_items: Vec<&Item> = all_items_clone
-                    .iter()
-                    .filter(|item| {
-                        if let Some(item_date_str) = extract_item_date(item) {
-                            if let Ok(item_date) =
-                                chrono::NaiveDate::parse_from_str(&item_date_str, "%Y-%m-%d")
-                            {
-                                return item_date > query_date;
-                            }
-                        }
-                        false
-                    })
-                    .collect();
-
-                if !future_items.is_empty() {
-                    // Find the closest future date
-                    let mut future_dates: Vec<NaiveDate> = future_items
-                        .iter()
-                        .filter_map(|item| extract_item_date(item))
-                        .filter_map(|date_str| {
-                            chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d").ok()
-                        })
-                        .collect();
-
-                    future_dates.sort();
-                    future_dates.dedup();
-
-                    if let Some(next_date) = future_dates.first() {
-                        let days_diff = (*next_date - query_date).num_days();
-                        let day_word = if days_diff == 1 { "day" } else { "days" };
-                        println!(
-                            "\n💡 No entries found for {}. The next entry is {} ({} {} later).",
-                            query_date.format("%Y-%m-%d"),
-                            next_date.format("%Y-%m-%d"),
-                            days_diff,
-                            day_word
-                        );
-                    }
-                }
-            }
-        }
-
-        if verbose {
-            println!("\n=== DEBUG INFO ===");
-            println!("Searched across all groups on the board");
-
-            // Check what groups are available
-            if let Some(groups) = &board.groups {
-                println!(
-                    "Available groups: {:?}",
-                    groups.iter().map(|g| &g.title).collect::<Vec<_>>()
-                );
-            }
-        }
     }
 
-    // Show appropriate final message based on whether we found exact matches
+    // Show final message based on results
     if let Some(query_date) = start_date {
         if target_days > 1 {
             let end_date = date_range
@@ -474,94 +252,54 @@ pub async fn handle_query_command(
                     end_date
                 );
             } else if filtered_items_len > 0 {
-                // Find the actual dates we found
-                let found_dates: Vec<String> = filtered_items
-                    .iter()
-                    .filter_map(|item| extract_item_date(item))
-                    .collect();
-
-                let unique_dates: Vec<&str> = found_dates.iter().map(|s| s.as_str()).collect();
                 println!(
-                    "\n⚠️  No exact matches found for date range: {} to {}. Showing {} closest items from dates: {:?}",
-                    query_date.format("%Y-%m-%d"),
-                    end_date,
+                    "\n⚠️  Showing {} items from date range: {} to {}",
                     filtered_items_len,
-                    unique_dates
-                );
-            } else {
-                println!(
-                    "\n❌ No items found for date range: {} to {}",
                     query_date.format("%Y-%m-%d"),
                     end_date
                 );
             }
         } else {
-            // SINGLE DAY QUERY - This is the key fix
             if has_exact_matches {
                 println!(
                     "\n✅ Found {} total items matching date filter: {}",
                     filtered_items_len,
                     query_date.format("%Y-%m-%d")
                 );
-            } else {
-                // No exact matches found for the single day
-                if filtered_items_len > 0 {
-                    // Find the actual dates we found
-                    let found_dates: Vec<String> = filtered_items
-                        .iter()
-                        .filter_map(|item| extract_item_date(item))
-                        .collect();
-
-                    let unique_dates: Vec<&str> = found_dates.iter().map(|s| s.as_str()).collect();
-
-                    // For single day queries, show a more helpful message
-                    if let Some(closest_date) = unique_dates.first() {
-                        if let Ok(closest_naive_date) =
-                            chrono::NaiveDate::parse_from_str(closest_date, "%Y-%m-%d")
-                        {
-                            let days_diff = (closest_naive_date - query_date).num_days();
-                            let direction = if days_diff > 0 { "later" } else { "earlier" };
-                            let day_word = if days_diff.abs() == 1 { "day" } else { "days" };
-
-                            println!(
-                                "\n⚠️  No entries found for {}. Showing closest entry from {} ({} {} {}).",
-                                query_date.format("%Y-%m-%d"),
-                                closest_date,
-                                days_diff.abs(),
-                                day_word,
-                                direction
-                            );
-                        } else {
-                            println!(
-                                "\n⚠️  No exact matches found for date: {}. Showing {} closest items from dates: {:?}",
-                                query_date.format("%Y-%m-%d"),
-                                filtered_items_len,
-                                unique_dates
-                            );
-                        }
-                    }
-                } else {
-                    println!(
-                        "\n❌ No items found for date: {}",
-                        query_date.format("%Y-%m-%d")
-                    );
-                }
+            } else if filtered_items_len > 0 {
+                println!(
+                    "\n⚠️  Showing {} items near date: {}",
+                    filtered_items_len,
+                    query_date.format("%Y-%m-%d")
+                );
             }
         }
     }
 
-    // NEW: Show applied filters in final message
-    if customer.is_some() || work_item.is_some() {
-        let mut filter_summary = Vec::new();
-        if let Some(c) = &customer {
-            filter_summary.push(format!("customer: {}", c));
-        }
-        if let Some(wi) = &work_item {
-            filter_summary.push(format!("work item: {}", wi));
-        }
+    // Show final summary message
+    if let Some(query_date) = start_date {
+        if target_days > 1 {
+            let end_date = date_range
+                .last()
+                .map(|d| d.format("%Y-%m-%d").to_string())
+                .unwrap_or_default();
 
-        if !filter_summary.is_empty() {
-            println!("Applied filters: {}", filter_summary.join(", "));
+            if has_exact_matches && filtered_items_len > 0 {
+                println!(
+                    "\n✅ Found {} total items matching date range: {} to {}",
+                    filtered_items_len,
+                    query_date.format("%Y-%m-%d"),
+                    end_date
+                );
+            }
+        } else {
+            if has_exact_matches && filtered_items_len > 0 {
+                println!(
+                    "\n✅ Found {} total items matching date filter: {}",
+                    filtered_items_len,
+                    query_date.format("%Y-%m-%d")
+                );
+            }
         }
     }
 
@@ -629,56 +367,6 @@ async fn stop_walking_dog_animation(handle: tokio::task::JoinHandle<()>) {
 }
 
 // Helper function to get year group ID
-
-// Improved helper function to check if an item belongs to a user with debugging
-fn is_user_item(item: &Item, user_id: i64, user_name: &str, user_email: &str) -> bool {
-    let mut found_by_id = false;
-    let mut found_by_name = false;
-    let mut found_by_email = false;
-
-    for col in &item.column_values {
-        if let Some(col_id) = &col.id {
-            if col_id == "person" {
-                // Method 1: Check by user ID in the JSON value
-                if let Some(value) = &col.value {
-                    if let Ok(parsed_value) = serde_json::from_str::<serde_json::Value>(value) {
-                        if let Some(persons) = parsed_value.get("personsAndTeams") {
-                            if let Some(persons_array) = persons.as_array() {
-                                for person in persons_array {
-                                    if let Some(person_id) =
-                                        person.get("id").and_then(|id| id.as_i64())
-                                    {
-                                        if person_id == user_id {
-                                            found_by_id = true;
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Method 2: Check by exact matching in text field
-                if let Some(text) = &col.text {
-                    if !text.is_empty() && text != "null" {
-                        if text == user_name {
-                            found_by_name = true;
-                        } else if text == user_email {
-                            found_by_email = true;
-                        } else if text.contains(&format!("\"name\":\"{}\"", user_name)) {
-                            found_by_name = true;
-                        } else if text.contains(&format!("\"email\":\"{}\"", user_email)) {
-                            found_by_email = true;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    found_by_id || found_by_name || found_by_email
-}
 
 // Fixed: Strict date matching function
 fn is_item_matching_date(item: &Item, target_date: &str) -> bool {
