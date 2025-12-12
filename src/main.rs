@@ -29,12 +29,12 @@ enum Commands {
         #[arg(short, long, default_value_t = 5)]
         limit: usize,
 
-        /// Date to filter claims (YYYY-MM-DD, YYYY.MM.DD, or YYYY/MM/DD format, default: today)
+        /// Date to filter claims (YYYY-MM-DD, YYYY.MM.DD, or YYYY/MM/DD format, default: 2 weeks before today)
         #[arg(short = 'D', long = "date")]
         date: Option<String>,
 
-        /// Number of days to query (default: 1, skips weekends)
-        #[arg(short = 'd', long = "days", default_value_t = 1)]
+        /// Number of days to query (default: 35 for ~5 weeks, skips weekends)
+        #[arg(short = 'd', long = "days", default_value_t = 35)]
         days: usize,
 
         /// Customer name to filter by

@@ -22,7 +22,7 @@ pub async fn handle_query_command(
 ) -> Result<()> {
     let board_id = "6500270039";
 
-    // Handle date filtering - default to today if no date provided
+    // Handle date filtering - default to current week + 2 weeks before + 2 weeks after
     let (start_date, target_days) = if let Some(ref date_str) = date {
         // Validate the date format
         validate_date(date_str)?;
@@ -30,9 +30,13 @@ pub async fn handle_query_command(
         let start_date = chrono::NaiveDate::parse_from_str(&normalized_date, "%Y-%m-%d")?;
         (Some(start_date), days)
     } else {
-        // Default to today's date
+        // Default to 2 weeks before today for better performance
+        // This will query: 2 weeks before + current week + 2 weeks after = ~5 weeks total
         let today = Local::now().naive_local().date();
-        (Some(today), days)
+        let start_date = today - chrono::Duration::days(14);
+        // Set days to cover the range (14 days before + today + 14 days after = ~29 days)
+        // But we'll use 35 to ensure we cover full 5 weeks
+        (Some(start_date), 35)
     };
 
     // Calculate the date range if start date is provided

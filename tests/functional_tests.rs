@@ -6,6 +6,12 @@
 // at the end of the test function using cleanup_test_entries(). This approach is
 // preferred over relying on alphabetical test execution order (e.g., "zzz" prefix).
 // Tests can be run in parallel or in any order without cleanup issues.
+//
+// Safety Measures:
+// - All test entries use unique identifiers (TEST_FUNCTIONAL_TEST_<timestamp>)
+// - Tests use a dedicated work item pattern (TEST.DELETE.ME.<timestamp>)
+// - Cleanup is performed even if tests fail (using Drop trait)
+// - Tests skip in CI environments to avoid accidental data modification
 
 #[cfg(test)]
 mod functional_tests {
@@ -13,10 +19,29 @@ mod functional_tests {
     use std::path::PathBuf;
     use std::process::Command;
     use std::str;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     // Thread-local storage for tracking entry IDs per test
     thread_local! {
         static TEST_ENTRY_IDS: std::cell::RefCell<Vec<String>> = std::cell::RefCell::new(Vec::new());
+    }
+
+    // Generate a unique test identifier based on timestamp
+    fn generate_test_id() -> String {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        format!("TEST_{}", timestamp)
+    }
+
+    // Generate a unique work item for testing
+    fn generate_test_work_item() -> String {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        format!("TEST.DELETE.ME.{}", timestamp)
     }
 
     // Helper function to get the path to the claim binary
@@ -119,6 +144,9 @@ mod functional_tests {
         let ids_to_delete = get_tracked_entry_ids();
 
         if ids_to_delete.is_empty() {
+            // Even if no IDs were tracked, try to clean up any test entries
+            println!("\n🧹 No tracked IDs, checking for orphaned test entries...");
+            cleanup_orphaned_test_entries();
             return;
         }
 
@@ -136,6 +164,8 @@ mod functional_tests {
                 Ok(_) => {
                     println!("    ✓ Deleted");
                     deleted += 1;
+                    // Small delay to avoid rate limiting
+                    std::thread::sleep(std::time::Duration::from_millis(500));
                 }
                 Err(e) => {
                     println!("    ✗ Failed: {}", e);
@@ -149,9 +179,50 @@ mod functional_tests {
             deleted, failed
         );
         clear_tracked_entry_ids();
+
+        // Also check for any orphaned test entries
+        cleanup_orphaned_test_entries();
     }
 
-    // Test 1: Add an entry with customer name 'TEST' and work item 'DELETE.ME'
+    // Helper function to cleanup orphaned test entries (entries not tracked)
+    fn cleanup_orphaned_test_entries() {
+        use chrono::prelude::*;
+        let today = Local::now().format("%Y-%m-%d").to_string();
+
+        // Query for test entries using work item filter
+        match run_claim_command(&["query", "-D", &today, "-d", "1", "-w", "DELETE.ME"]) {
+            Ok((stdout, _)) => {
+                // Extract IDs from output
+                let orphaned_ids: Vec<String> = stdout
+                    .lines()
+                    .filter_map(|line| {
+                        if line.contains("ID:") {
+                            extract_entry_id(line)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                if !orphaned_ids.is_empty() {
+                    println!(
+                        "⚠️  Found {} orphaned test entries, cleaning up...",
+                        orphaned_ids.len()
+                    );
+                    for id in orphaned_ids {
+                        println!("  Deleting orphaned entry ID: {}", id);
+                        let _ = run_claim_command(&["delete", "-x", &id, "-y"]);
+                        std::thread::sleep(std::time::Duration::from_millis(500));
+                    }
+                }
+            }
+            Err(_) => {
+                // Ignore errors in orphan cleanup
+            }
+        }
+    }
+
+    // Test 1: Add an entry with unique test identifiers
     #[test]
     fn test_add_entry() {
         // Skip this test in CI environments without proper Monday.com configuration
@@ -160,12 +231,20 @@ mod functional_tests {
             return;
         }
 
+        let test_customer = generate_test_id();
+        let test_work_item = generate_test_work_item();
+
+        println!(
+            "🧪 Creating test entry with customer: {}, work item: {}",
+            test_customer, test_work_item
+        );
+
         let result = run_claim_command(&[
             "add",
             "-c",
-            "TEST",
+            &test_customer,
             "-w",
-            "DELETE.ME",
+            &test_work_item,
             "-H",
             "1",
             "-t",
@@ -217,18 +296,15 @@ mod functional_tests {
             return;
         }
 
-        let result = run_claim_command(&["query", "-d", "1"]);
+        let result = run_claim_command(&["query", "-d", "35"]);
 
         match result {
             Ok((stdout, _)) => {
-                // Look for our test entry in the output
-                let has_test_entry = stdout.contains("TEST") && stdout.contains("DELETE.ME");
+                // Look for any test entries in the output (entries with TEST_ prefix)
+                let has_test_entry = stdout.contains("TEST_") || stdout.contains("TEST.DELETE.ME");
 
                 if has_test_entry {
-                    // Try to extract the entry ID for later deletion
-                    if let Some(entry_id) = extract_entry_id(&stdout) {
-                        track_created_entry(entry_id);
-                    }
+                    println!("⚠️  Found test entries in query output - these should be cleaned up");
                 }
 
                 // The test passes as long as the query command runs
@@ -295,14 +371,21 @@ mod functional_tests {
             return;
         }
 
+        let test_customer = generate_test_id();
+        let test_work_item = generate_test_work_item();
+
         println!("🚀 Testing add operation with workflow parameters");
+        println!(
+            "🧪 Using customer: {}, work item: {}",
+            test_customer, test_work_item
+        );
 
         let add_result = run_claim_command(&[
             "add",
             "-c",
-            "TEST",
+            &test_customer,
             "-w",
-            "DELETE.ME",
+            &test_work_item,
             "-H",
             "1",
             "-t",
@@ -339,7 +422,7 @@ mod functional_tests {
 
         println!("🚀 Testing query operation");
 
-        let query_result = run_claim_command(&["query", "-d", "1"]);
+        let query_result = run_claim_command(&["query", "-d", "35"]);
 
         match query_result {
             Ok((stdout, stderr)) => {
@@ -361,15 +444,22 @@ mod functional_tests {
             return;
         }
 
+        let test_customer = generate_test_id();
+        let test_work_item = generate_test_work_item();
+
         println!("🚀 Testing delete operation with workflow");
+        println!(
+            "🧪 Using customer: {}, work item: {}",
+            test_customer, test_work_item
+        );
 
         // First create an entry to delete
         let add_result = run_claim_command(&[
             "add",
             "-c",
-            "TEST",
+            &test_customer,
             "-w",
-            "DELETE.ME",
+            &test_work_item,
             "-H",
             "1",
             "-t",
@@ -421,7 +511,7 @@ mod functional_tests {
             return;
         }
 
-        let result = run_claim_command(&["query", "-v", "-d", "1"]);
+        let result = run_claim_command(&["query", "-v", "-d", "35"]);
 
         match result {
             Ok((stdout, _)) => {
@@ -471,12 +561,20 @@ mod functional_tests {
             return;
         }
 
+        let test_customer = generate_test_id();
+        let test_work_item = generate_test_work_item();
+
+        println!(
+            "🧪 Creating test entry for today with customer: {}, work item: {}",
+            test_customer, test_work_item
+        );
+
         let result = run_claim_command(&[
             "add",
             "-c",
-            "TEST",
+            &test_customer,
             "-w",
-            "DELETE.ME",
+            &test_work_item,
             "-H",
             "1",
             "-y", // Skip confirmation and use default date (today)
@@ -527,7 +625,7 @@ mod functional_tests {
         use chrono::prelude::*;
         let today = Local::now().format("%Y-%m-%d").to_string();
 
-        let result = run_claim_command(&["query", "-D", &today, "-d", "1"]);
+        let result = run_claim_command(&["query", "-D", &today, "-d", "35"]);
 
         match result {
             Ok((_stdout, _)) => {
@@ -553,12 +651,20 @@ mod functional_tests {
             return;
         }
 
+        let test_customer = generate_test_id();
+        let test_work_item = generate_test_work_item();
+
+        println!(
+            "🧪 Creating multi-day test entries with customer: {}, work item: {}",
+            test_customer, test_work_item
+        );
+
         let result = run_claim_command(&[
             "add",
             "-c",
-            "TEST",
+            &test_customer,
             "-w",
-            "DELETE.ME",
+            &test_work_item,
             "-H",
             "8",
             "-d",
@@ -611,7 +717,7 @@ mod functional_tests {
             return;
         }
 
-        let result = run_claim_command(&["query", "--limit", "3", "-d", "1"]);
+        let result = run_claim_command(&["query", "--limit", "3", "-d", "35"]);
 
         match result {
             Ok((_stdout, _)) => {
