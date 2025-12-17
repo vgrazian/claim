@@ -162,6 +162,45 @@ pub async fn handle_query_command(
         stop_walking_dog_animation(handle).await;
     }
 
+    // Apply client-side filtering for customer and work_item
+    let filtered_items: Vec<Item> = filtered_items
+        .into_iter()
+        .filter(|item| {
+            // Filter by customer if specified
+            if let Some(ref customer_filter) = customer {
+                let item_customer = extract_column_value(item, "text__1");
+                // Case-insensitive partial match
+                if !item_customer
+                    .to_lowercase()
+                    .contains(&customer_filter.to_lowercase())
+                {
+                    return false;
+                }
+            }
+
+            // Filter by work_item if specified
+            if let Some(ref work_item_filter) = work_item {
+                let item_work_item = extract_column_value(item, "text8__1");
+                // Case-insensitive partial match
+                if !item_work_item
+                    .to_lowercase()
+                    .contains(&work_item_filter.to_lowercase())
+                {
+                    return false;
+                }
+            }
+
+            true
+        })
+        .collect();
+
+    if verbose && (customer.is_some() || work_item.is_some()) {
+        println!(
+            "After client-side filtering: {} items",
+            filtered_items.len()
+        );
+    }
+
     // Determine if we have exact matches
     let has_exact_matches = if !date_range.is_empty() {
         filtered_items
@@ -180,13 +219,14 @@ pub async fn handle_query_command(
         if let Some(_start_date_val) = start_date {
             if target_days > 1 {
                 // Multi-day query - show simplified table
+                let has_filters = customer.is_some() || work_item.is_some();
                 display_simplified_table(
                     &filtered_items,
                     &date_range,
                     &user.name,
                     verbose,
                     has_exact_matches,
-                    false,
+                    has_filters,
                 );
             } else {
                 // Single day query - show detailed format
