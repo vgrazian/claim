@@ -10,6 +10,10 @@ use std::io::{self, Write};
 use std::time::Duration;
 use tokio::task;
 
+// Column ID constants
+const CUSTOMER_COLUMN_ID: &str = "text__1";
+const WORK_ITEM_COLUMN_ID: &str = "text8__1";
+
 pub async fn handle_query_command(
     client: &MondayClient,
     user: &MondayUser,
@@ -162,43 +166,50 @@ pub async fn handle_query_command(
         stop_walking_dog_animation(handle).await;
     }
 
-    // Apply client-side filtering for customer and work_item
+    // Helper function to check if an item matches a filter for a given column
+    fn matches_filter(item: &Item, column_id: &str, filter: &Option<String>) -> bool {
+        if let Some(ref filter_value) = filter {
+            let item_value = extract_column_value(item, column_id);
+            // Explicit empty string check to prevent empty filters from matching empty values
+            if filter_value.is_empty() || item_value.is_empty() {
+                return false;
+            }
+            // Case-insensitive partial match
+            if !item_value
+                .to_lowercase()
+                .contains(&filter_value.to_lowercase())
+            {
+                return false;
+            }
+        }
+        true
+    }
+
+    // Client-side filtering required because Monday.com API doesn't support filtering by customer and work_item columns in query_params
     let filtered_items: Vec<Item> = filtered_items
         .into_iter()
         .filter(|item| {
             // Filter by customer if specified
-            if let Some(ref customer_filter) = customer {
-                let item_customer = extract_column_value(item, "text__1");
-                // Case-insensitive partial match
-                if !item_customer
-                    .to_lowercase()
-                    .contains(&customer_filter.to_lowercase())
-                {
-                    return false;
-                }
+            if !matches_filter(item, CUSTOMER_COLUMN_ID, &customer) {
+                return false;
             }
 
             // Filter by work_item if specified
-            if let Some(ref work_item_filter) = work_item {
-                let item_work_item = extract_column_value(item, "text8__1");
-                // Case-insensitive partial match
-                if !item_work_item
-                    .to_lowercase()
-                    .contains(&work_item_filter.to_lowercase())
-                {
-                    return false;
-                }
+            if !matches_filter(item, WORK_ITEM_COLUMN_ID, &work_item) {
+                return false;
             }
 
             true
         })
         .collect();
 
-    if verbose && (customer.is_some() || work_item.is_some()) {
-        println!(
-            "After client-side filtering: {} items",
-            filtered_items.len()
-        );
+    if verbose {
+        if customer.is_some() || work_item.is_some() {
+            println!(
+                "After client-side filtering: {} items",
+                filtered_items.len()
+            );
+        }
     }
 
     // Determine if we have exact matches
@@ -484,8 +495,8 @@ fn map_column_title(column_id: &str) -> &str {
         "person" => "Person",
         "status" => "Status",
         "date4" => "Date",
-        "text__1" => "Customer",
-        "text8__1" => "Work Item",
+        CUSTOMER_COLUMN_ID => "Customer",
+        WORK_ITEM_COLUMN_ID => "Work Item",
         "text2__1" => "Comment", // FIXED: Map text2__1 to Comment
         "numbers__1" => "Hours",
         "hours" => "Hours",
@@ -665,8 +676,8 @@ fn display_simplified_table(
             displayed_items += date_items.len();
             for item in date_items {
                 let status = extract_status_value(item);
-                let customer = extract_column_value(item, "text__1");
-                let work_item = extract_column_value(item, "text8__1");
+                let customer = extract_column_value(item, CUSTOMER_COLUMN_ID);
+                let work_item = extract_column_value(item, WORK_ITEM_COLUMN_ID);
                 let hours_str = extract_column_value(item, "numbers__1");
                 let comment = extract_comment_value(item); // FIXED: Extract comment from correct column
                 let hours = hours_str.parse::<f64>().unwrap_or(0.0);
@@ -990,11 +1001,11 @@ mod tests {
     fn test_extract_column_value() {
         let mut item = Item::default();
         let mut text_column = ColumnValue::default();
-        text_column.id = Some("text__1".to_string());
+        text_column.id = Some(CUSTOMER_COLUMN_ID.to_string());
         text_column.value = Some("Test Customer".to_string());
         item.column_values.push(text_column);
 
-        let extracted_value = extract_column_value(&item, "text__1");
+        let extracted_value = extract_column_value(&item, CUSTOMER_COLUMN_ID);
         assert_eq!(extracted_value, "Test Customer");
     }
 
@@ -1027,9 +1038,9 @@ mod tests {
         assert_eq!(map_column_title("date4"), "Date");
         assert_eq!(map_column_title("person"), "Person");
         assert_eq!(map_column_title("status"), "Status");
-        assert_eq!(map_column_title("text__1"), "Customer");
+        assert_eq!(map_column_title(CUSTOMER_COLUMN_ID), "Customer");
         assert_eq!(map_column_title("text2__1"), "Comment");
-        assert_eq!(map_column_title("text8__1"), "Work Item");
+        assert_eq!(map_column_title(WORK_ITEM_COLUMN_ID), "Work Item");
         assert_eq!(map_column_title("unknown"), "unknown");
     }
 
