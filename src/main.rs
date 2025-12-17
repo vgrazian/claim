@@ -2,6 +2,7 @@ mod add;
 mod cache;
 mod config;
 mod delete;
+mod interactive;
 mod monday;
 mod query;
 mod selenium;
@@ -255,8 +256,12 @@ async fn run(cli: Cli) -> Result<()> {
             .await?;
         }
         None => {
-            // Default action when no command is provided
-            println!("No command specified. Use --help for available commands.");
+            // Launch interactive UI when no command is provided
+            println!("Launching interactive UI...\n");
+            if let Err(e) = interactive::run_interactive().await {
+                eprintln!("Interactive UI error: {}", e);
+                process::exit(1);
+            }
         }
     }
 

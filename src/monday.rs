@@ -614,6 +614,59 @@ impl MondayClient {
             Err(anyhow!("No data returned from create item mutation"))
         }
     }
+    pub async fn update_item_verbose(
+        &self,
+        item_id: &str,
+        column_values: &serde_json::Value,
+        verbose: bool,
+    ) -> Result<()> {
+        let query = format!(
+            r#"
+        mutation {{
+            change_multiple_column_values(
+                item_id: {},
+                board_id: "6500270039",
+                column_values: "{}"
+            ) {{
+                id
+            }}
+        }}
+        "#,
+            item_id,
+            column_values.to_string().replace('"', "\\\"")
+        );
+
+        if verbose {
+            println!("Sending update item mutation:\n{}", query);
+        }
+
+        let request_body = MondayRequest {
+            query: query.to_string(),
+        };
+
+        let response = self.send_request(request_body, verbose).await?;
+
+        if verbose {
+            println!("Update item response: {}", response);
+        }
+
+        let monday_response: MondayResponse = serde_json::from_str(&response)
+            .map_err(|e| anyhow!("Failed to parse update item response: {}", e))?;
+
+        if !monday_response.errors.is_empty() {
+            let error_messages: Vec<String> = monday_response
+                .errors
+                .iter()
+                .map(|e| format!("{} (code: {})", e.message, e.error_code))
+                .collect();
+            return Err(anyhow!(
+                "Monday.com API errors: {}",
+                error_messages.join(", ")
+            ));
+        }
+
+        Ok(())
+    }
 
     // Method to query ALL items in a group (without user filtering)
     pub async fn query_all_items_in_group(
@@ -822,10 +875,7 @@ impl MondayClient {
         let response = self.send_request(request_body, verbose).await?;
 
         if verbose {
-            println!(
-                "Response: {}",
-                &response[..500.min(response.len())]
-            );
+            println!("Response: {}", &response[..500.min(response.len())]);
         }
 
         // Parse the response
