@@ -14,6 +14,8 @@ claim - Monday.com claim management tool
 
 **claim** **add** [*ADD_OPTIONS*]
 
+**claim** **delete** [*DELETE_OPTIONS*]
+
 ## DESCRIPTION
 
 **claim** is a command-line application for processing claims with Monday.com API integration. It provides secure API key storage, interactive setup, and functionality to query and add claim entries to Monday.com boards.
@@ -63,9 +65,9 @@ Your Monday.com API key needs the following permissions:
 
 ## USAGE
 
-### Subsequent Runs
+### Interactive UI Mode (Default)
 
-After the initial setup, the application will automatically use the stored API key:
+When run without any command, the application launches an interactive terminal UI:
 
 ```bash
 cargo run
@@ -73,11 +75,59 @@ cargo run
 ./target/release/claim
 ```
 
-**Output:**
+The interactive UI provides:
 
-```text
-Running for user id *****, user name ***** *****, email ******** for year ####
-No command specified. Use --help for available commands.
+- **Week-based calendar view** with all your claim entries
+- **Visual summary chart** showing hours distribution
+- **Entry details panel** for selected entries
+- **Report mode** for analyzing work by customer/project
+- **Intuitive keyboard controls** for navigation and editing
+
+#### Interactive UI Controls
+
+**Normal Mode:**
+- `←/→` or `Tab/Shift+Tab`: Navigate between weeks
+- `↑/↓`: Navigate between days
+- `j/k`: Navigate between entries on selected day
+- `a`: Add new entry
+- `e`: Edit selected entry
+- `d`: Delete selected entry
+- `u`: Update/refresh data from Monday.com
+- `p`: Switch to Report mode
+- `h` or `?`: Show help
+- `q`: Quit application
+
+**Add/Edit Mode:**
+- `Tab`: Move to next field
+- `Shift+Tab`: Move to previous field
+- `←/→`: Move cursor within field
+- `Home/End`: Jump to start/end of field
+- `Backspace/Delete`: Remove characters
+- `0-9`: Quick select from activity types or cache
+- `Enter`: Save entry
+- `Esc`: Cancel
+
+**Report Mode:**
+- `Tab/Shift+Tab`: Navigate between weeks
+- `↑/↓`: Navigate between report rows
+- `Esc`: Return to normal mode
+- `q`: Quit application
+
+**Features:**
+- **Smart caching**: Recently used customers and work items appear in quick-select panel
+- **Visual cursor**: See exactly where you're typing in form fields
+- **Activity type shortcuts**: Press 0-9 to quickly select activity types
+- **Automatic refresh**: Data updates after add/edit/delete operations
+- **Report view**: Analyze hours by customer and work item with daily breakdown
+
+### Command-Line Mode
+
+For automation and scripting, all commands are available via CLI:
+
+```bash
+claim query [OPTIONS]
+claim add [OPTIONS]
+claim delete [OPTIONS]
 ```
 
 ## COMMANDS
@@ -576,19 +626,37 @@ The project has been refactored into a modular structure:
 ```
 claim/
 ├── src/
-│ ├── main.rs # CLI setup, common utilities, and command routing
-│ ├── config.rs # Configuration management and API key handling
-│ ├── monday.rs # Monday.com API client and data structures
-│ ├── query.rs # All query-related functionality
-│ ├── delete.rs # All delete-related functionality
-│ ├── utils.rs # Some mixed utility functions (mostly unused)
-│ └── add.rs # All add-related functionality
-├── Cargo.toml # Project dependencies and metadata
-└── README.md # This file
+│ ├── main.rs              # CLI setup and command routing
+│ ├── config.rs            # Configuration management and API key handling
+│ ├── monday.rs            # Monday.com API client and data structures
+│ ├── query.rs             # Query command functionality
+│ ├── delete.rs            # Delete command functionality
+│ ├── add.rs               # Add command functionality
+│ ├── cache.rs             # Entry caching for autocomplete
+│ ├── time.rs              # Date/time utilities
+│ ├── utils.rs             # Utility functions
+│ ├── selenium.rs          # Browser automation (if needed)
+│ └── interactive/         # Interactive UI module
+│     ├── mod.rs           # Module exports
+│     ├── app.rs           # Main application state and logic
+│     ├── ui.rs            # UI rendering
+│     ├── events.rs        # Event handling
+│     ├── form.rs          # Form data structures
+│     ├── form_ui.rs       # Form rendering with cursor support
+│     ├── week_view.rs     # Week calendar view
+│     ├── summary_chart.rs # Hours distribution chart
+│     ├── entry_details.rs # Entry details panel
+│     ├── activity_types.rs# Activity type definitions
+│     ├── messages.rs      # Status messages
+│     ├── dialogs.rs       # Dialog components
+│     └── utils.rs         # UI utilities
+├── Cargo.toml             # Project dependencies and metadata
+└── README.md              # This file
 ```
 
 ## DEPENDENCIES
 
+### Core Dependencies
 - **serde** - Serialization/deserialization framework
 - **serde_json** - JSON support for Serde
 - **directories** - Cross-platform directory location handling
@@ -597,6 +665,10 @@ claim/
 - **anyhow** - Error handling
 - **chrono** - Date/time handling
 - **clap** - Command-line argument parsing
+
+### Interactive UI Dependencies
+- **ratatui** - Terminal UI framework
+- **crossterm** - Cross-platform terminal manipulation
 
 ## Monday.com Integration
 
