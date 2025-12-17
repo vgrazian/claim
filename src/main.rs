@@ -1,4 +1,5 @@
 mod add;
+mod cache;
 mod config;
 mod delete;
 mod monday;
@@ -76,8 +77,12 @@ enum Commands {
         days: Option<f64>,
 
         /// Comment for the claim
-        #[arg(short = 'k', long = "comment")] // NEW: Comment parameter
+        #[arg(short = 'k', long = "comment")]
         comment: Option<String>,
+
+        /// Refresh cache by querying the last 4 weeks of entries
+        #[arg(short = 'r', long = "refresh-cache")]
+        refresh_cache: bool,
 
         /// Skip confirmation prompt
         #[arg(short = 'y', long = "yes")]
@@ -206,7 +211,8 @@ async fn run(cli: Cli) -> Result<()> {
             work_item,
             hours,
             days,
-            comment, // NEW: Pass comment
+            comment,
+            refresh_cache,
             yes,
             verbose,
         }) => {
@@ -220,7 +226,8 @@ async fn run(cli: Cli) -> Result<()> {
                 work_item,
                 hours,
                 days,
-                comment, // NEW: Pass comment
+                comment,
+                refresh_cache,
                 yes,
                 verbose,
             )

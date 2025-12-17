@@ -1,3 +1,4 @@
+use crate::cache::EntryCache;
 use crate::monday::{MondayClient, MondayUser};
 use crate::{
     calculate_working_dates, get_year_group_id, map_activity_type_to_value, normalize_date,
@@ -20,9 +21,83 @@ pub async fn handle_add_command(
     hours: Option<f64>,
     days: Option<f64>,
     comment: Option<String>,
+    refresh_cache: bool,
     yes: bool,
     verbose: bool,
 ) -> Result<()> {
+    // Handle cache refresh if requested
+    let mut cache = EntryCache::load().unwrap_or_else(|_| EntryCache::new());
+
+    if refresh_cache || cache.is_stale(24) {
+        if verbose || refresh_cache {
+            println!("🔄 Refreshing cache from last 4 weeks...");
+        }
+
+        // Query last 4 weeks (28 days)
+        let today = Local::now().naive_local().date();
+        let start_date = today - chrono::Duration::days(28);
+
+        // Get the group ID for the current year
+        let board = client.get_board_with_groups("6500270039", verbose).await?;
+        let group_id = get_year_group_id(&board, current_year);
+
+        if verbose {
+            println!(
+                "Querying all items for user {} in group {} (year {})",
+                user.id, group_id, current_year
+            );
+        }
+
+        // Query all items for the user in the current year (without date filter)
+        // We'll filter by date on the client side to avoid API limits
+        let all_items = client
+            .query_items_with_filters(
+                "6500270039",
+                &group_id,
+                user.id,
+                &[], // Empty date filter - get all items for the user
+                500,
+                verbose,
+            )
+            .await?;
+
+        if verbose {
+            println!("Retrieved {} total items for user", all_items.len());
+        }
+
+        // Extract customer and work item pairs from items, filtering by date range
+        let mut entries = Vec::new();
+        for item in &all_items {
+            let customer = extract_customer_from_item(item);
+            let work_item = extract_work_item_from_item(item);
+            let date = extract_date_from_item(item);
+
+            if !customer.is_empty() && !work_item.is_empty() {
+                if let Some(d) = date {
+                    // Only include items within the last 4 weeks
+                    if d >= start_date && d <= today {
+                        entries.push((customer, work_item, d));
+                    }
+                }
+            }
+        }
+
+        if verbose {
+            println!("Filtered to {} entries within date range", entries.len());
+        }
+
+        cache.update_from_items(&entries);
+        cache.save()?;
+
+        if verbose || refresh_cache {
+            println!(
+                "✅ Cache refreshed with {} unique entries from {} items in date range",
+                cache.get_unique_entries().len(),
+                entries.len()
+            );
+        }
+    }
+
     let (
         final_date,
         final_activity_type,
@@ -40,7 +115,7 @@ pub async fn handle_add_command(
         && days.is_none()
         && comment.is_none()
     {
-        let (d, at, c, wi, h, d_val, cmt) = prompt_for_claim_details()?;
+        let (d, at, c, wi, h, d_val, cmt) = prompt_for_claim_details(&cache)?;
         (d, at, c, wi, h, d_val, cmt, true)
     } else {
         if let Some(ref d) = date {
@@ -512,7 +587,9 @@ fn show_equivalent_command(
     println!("   {}", command_parts.join(" "));
 }
 
-fn prompt_for_claim_details() -> Result<(
+fn prompt_for_claim_details(
+    cache: &EntryCache,
+) -> Result<(
     String,
     Option<String>,
     Option<String>,
@@ -524,7 +601,48 @@ fn prompt_for_claim_details() -> Result<(
     use std::io::{self, Write};
 
     println!("\n=== Add New Claim ===");
-    println!("Enter claim details (press Enter to skip optional fields):");
+
+    // Show cached entries if available
+    let cached_entries = cache.get_unique_entries();
+    if !cached_entries.is_empty() {
+        println!("\n📋 Recent entries (from last 4 weeks):");
+        for (i, entry) in cached_entries.iter().take(10).enumerate() {
+            println!(
+                "  {}. {} | {} (last used: {})",
+                i + 1,
+                entry.customer,
+                entry.work_item,
+                entry.last_used
+            );
+        }
+        println!("\nYou can select an entry by number, or enter details manually.");
+        print!("Select entry number (or press Enter to enter manually): ");
+        io::stdout().flush()?;
+
+        let mut selection = String::new();
+        io::stdin().read_line(&mut selection)?;
+        let selection = selection.trim();
+
+        if !selection.is_empty() {
+            if let Ok(idx) = selection.parse::<usize>() {
+                if idx > 0 && idx <= cached_entries.len() {
+                    let selected = &cached_entries[idx - 1];
+                    println!(
+                        "\n✅ Selected: {} | {}",
+                        selected.customer, selected.work_item
+                    );
+
+                    // Continue with the rest of the prompts using the selected entry
+                    return prompt_with_preselected_entry(
+                        Some(selected.customer.clone()),
+                        Some(selected.work_item.clone()),
+                    );
+                }
+            }
+        }
+    }
+
+    println!("\nEnter claim details (press Enter to skip optional fields):");
 
     // Date (optional, defaults to today)
     let mut date = String::new();
@@ -725,6 +843,224 @@ fn normalize_activity_type_input(input: &str) -> String {
 
 fn validate_date_flexible(date_str: &str) -> Result<()> {
     validate_date(date_str)
+}
+
+// Helper function to extract customer from item
+fn extract_customer_from_item(item: &crate::monday::Item) -> String {
+    for col in &item.column_values {
+        if let Some(id) = &col.id {
+            if id == "text__1" {
+                if let Some(text) = &col.text {
+                    if text != "null" && !text.is_empty() {
+                        return text.clone();
+                    }
+                }
+            }
+        }
+    }
+    String::new()
+}
+
+// Helper function to extract work item from item
+fn extract_work_item_from_item(item: &crate::monday::Item) -> String {
+    for col in &item.column_values {
+        if let Some(id) = &col.id {
+            if id == "text8__1" {
+                if let Some(text) = &col.text {
+                    if text != "null" && !text.is_empty() {
+                        return text.clone();
+                    }
+                }
+            }
+        }
+    }
+    String::new()
+}
+
+// Helper function to extract date from item
+fn extract_date_from_item(item: &crate::monday::Item) -> Option<NaiveDate> {
+    for col in &item.column_values {
+        if let Some(id) = &col.id {
+            if id == "date4" {
+                if let Some(value) = &col.value {
+                    if value != "null" && !value.is_empty() {
+                        // Try to parse the JSON value
+                        if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(value) {
+                            if let Some(date_str) = json_val.get("date").and_then(|d| d.as_str()) {
+                                if let Ok(date) = NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
+                                    return Some(date);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+// Helper function to prompt with preselected customer and work item
+fn prompt_with_preselected_entry(
+    customer: Option<String>,
+    work_item: Option<String>,
+) -> Result<(
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<f64>,
+    Option<f64>,
+    Option<String>,
+)> {
+    use std::io::{self, Write};
+
+    // Date (optional, defaults to today)
+    let mut date = String::new();
+    print!("Date (YYYY-MM-DD, YYYY.MM.DD, or YYYY/MM/DD, optional - default: today): ");
+    io::stdout().flush()?;
+    io::stdin().read_line(&mut date)?;
+    date = date.trim().to_string();
+
+    if !date.is_empty() {
+        if validate_date_flexible(&date).is_ok() {
+            date = normalize_date(&date);
+        } else {
+            println!(
+                "Invalid date format. Please use YYYY-MM-DD, YYYY.MM.DD, or YYYY/MM/DD format."
+            );
+            return Err(anyhow!("Invalid date format"));
+        }
+    }
+
+    // Activity type (optional, defaults to billable)
+    println!("\nAvailable activity types:");
+    println!(" 0 - vacation");
+    println!(" 1 - billable (default)");
+    println!(" 2 - holding");
+    println!(" 3 - education");
+    println!(" 4 - work_reduction");
+    println!(" 5 - tbd");
+    println!(" 6 - holiday");
+    println!(" 7 - presales");
+    println!(" 8 - illness");
+    println!(" 9 - paid_not_worked");
+    println!("10 - intellectual_capital");
+    println!("11 - business_development");
+    println!("12 - overhead");
+    print!("\nActivity type (enter number or name, optional - default: billable): ");
+    io::stdout().flush()?;
+    let mut activity_type = String::new();
+    io::stdin().read_line(&mut activity_type)?;
+    let activity_type = activity_type.trim().to_string();
+
+    let activity_type = if activity_type.is_empty() {
+        None
+    } else {
+        if let Ok(num) = activity_type.parse::<u8>() {
+            match num {
+                0 => Some("vacation".to_string()),
+                1 => Some("billable".to_string()),
+                2 => Some("holding".to_string()),
+                3 => Some("education".to_string()),
+                4 => Some("work_reduction".to_string()),
+                5 => Some("tbd".to_string()),
+                6 => Some("holiday".to_string()),
+                7 => Some("presales".to_string()),
+                8 => Some("illness".to_string()),
+                9 => Some("paid_not_worked".to_string()),
+                10 => Some("intellectual_capital".to_string()),
+                11 => Some("business_development".to_string()),
+                12 => Some("overhead".to_string()),
+                _ => {
+                    println!("Invalid activity type number. Using default 'billable'.");
+                    Some("billable".to_string())
+                }
+            }
+        } else {
+            let normalized_type = normalize_activity_type_input(&activity_type);
+            match normalized_type.as_str() {
+                "vacation" | "0" => Some("vacation".to_string()),
+                "billable" | "1" => Some("billable".to_string()),
+                "holding" | "2" => Some("holding".to_string()),
+                "education" | "3" => Some("education".to_string()),
+                "work_reduction" | "4" => Some("work_reduction".to_string()),
+                "tbd" | "5" => Some("tbd".to_string()),
+                "holiday" | "6" => Some("holiday".to_string()),
+                "presales" | "7" => Some("presales".to_string()),
+                "illness" | "8" => Some("illness".to_string()),
+                "paid_not_worked" | "9" => Some("paid_not_worked".to_string()),
+                "intellectual_capital" | "10" => Some("intellectual_capital".to_string()),
+                "business_development" | "11" => Some("business_development".to_string()),
+                "overhead" | "12" => Some("overhead".to_string()),
+                _ => {
+                    println!(
+                        "❌ Error: Unknown activity type '{}'. Please use a valid number or name.",
+                        activity_type
+                    );
+                    return Err(anyhow!("Unknown activity type: {}", activity_type));
+                }
+            }
+        }
+    };
+
+    // Comment (optional)
+    print!("Comment (optional): ");
+    io::stdout().flush()?;
+    let mut comment = String::new();
+    io::stdin().read_line(&mut comment)?;
+    let comment = comment.trim().to_string();
+    let comment = if comment.is_empty() {
+        None
+    } else {
+        Some(comment)
+    };
+
+    // Hours (optional)
+    print!("Number of hours (optional): ");
+    io::stdout().flush()?;
+    let mut hours = String::new();
+    io::stdin().read_line(&mut hours)?;
+    let hours = hours.trim();
+    let hours = if hours.is_empty() {
+        None
+    } else {
+        match hours.parse::<f64>() {
+            Ok(h) => Some(h),
+            Err(_) => {
+                println!("Invalid number format for hours. Skipping.");
+                None
+            }
+        }
+    };
+
+    // Days (optional, defaults to 1)
+    print!("Number of working days (optional, default: 1, skips weekends): ");
+    io::stdout().flush()?;
+    let mut days = String::new();
+    io::stdin().read_line(&mut days)?;
+    let days = days.trim();
+    let days = if days.is_empty() {
+        None
+    } else {
+        match days.parse::<f64>() {
+            Ok(d) => Some(d),
+            Err(_) => {
+                println!("Invalid number format for days. Skipping.");
+                None
+            }
+        }
+    };
+
+    Ok((
+        date,
+        activity_type,
+        customer,
+        work_item,
+        hours,
+        days,
+        comment,
+    ))
 }
 
 #[cfg(test)]
