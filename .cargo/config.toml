@@ -1,0 +1,53 @@
+# Cargo configuration for build optimization and settings
+
+[build]
+# Use all available CPU cores for parallel compilation (commented out - let cargo decide)
+# jobs = 4
+
+[target.x86_64-unknown-linux-gnu]
+# Use lld linker on Linux for faster linking (if available)
+# rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+
+[target.x86_64-apple-darwin]
+# Use zld linker on macOS for faster linking (if available)
+# rustflags = ["-C", "link-arg=-fuse-ld=zld"]
+
+[target.aarch64-apple-darwin]
+# Use zld linker on macOS ARM for faster linking (if available)
+# rustflags = ["-C", "link-arg=-fuse-ld=zld"]
+
+[profile.dev]
+# Faster compilation for development
+opt-level = 0
+debug = true
+split-debuginfo = "unpacked"
+
+[profile.release]
+# Optimized release builds
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[profile.release-with-debug]
+# Release with debug symbols for profiling
+inherits = "release"
+debug = true
+strip = false
+
+# Faster incremental builds
+[profile.dev.package."*"]
+opt-level = 0
+
+# Speed up proc-macro compilation
+[profile.dev.build-override]
+opt-level = 3
+
+# Network settings
+[net]
+git-fetch-with-cli = false
+
+# Registry settings
+[registries.crates-io]
+protocol = "sparse"
