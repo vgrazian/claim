@@ -1,7 +1,7 @@
+//! Utility functions for the claim application
+
 use anyhow::{anyhow, Result};
 use chrono::prelude::*;
-
-/// Utility functions for the claim application
 
 // ===== STRING UTILITIES =====
 
@@ -77,7 +77,7 @@ pub fn calculate_working_dates(start_date: NaiveDate, target_days: i64) -> Vec<N
         }
 
         // Move to next day
-        current_date = current_date + chrono::Duration::days(1);
+        current_date += chrono::Duration::days(1);
     }
 
     dates

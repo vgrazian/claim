@@ -132,6 +132,7 @@ pub enum ValidationError {
 }
 
 /// Result type alias for the claim application
+#[allow(dead_code)]
 pub type Result<T> = std::result::Result<T, ClaimError>;
 
 // Conversion from anyhow::Error for backward compatibility during migration

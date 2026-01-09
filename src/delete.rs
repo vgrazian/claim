@@ -2,6 +2,7 @@ use crate::monday::{MondayClient, MondayUser};
 use anyhow::{anyhow, Result};
 use std::io;
 
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_delete_command(
     client: &MondayClient,
     user: &MondayUser,
@@ -61,7 +62,7 @@ async fn delete_by_id(
         println!("🔍 Fetching item details...");
     }
 
-    match client.get_item_by_id(&delete_id, verbose).await {
+    match client.get_item_by_id(delete_id, verbose).await {
         Ok(Some(item)) => {
             println!("\n📋 Item Details:");
             println!("  Name: {}", item.name.as_deref().unwrap_or("Unnamed"));
@@ -139,7 +140,7 @@ async fn delete_by_id(
 
     // Perform the deletion
     println!("\n🔄 Deleting item...");
-    match client.delete_item(&delete_id, verbose).await {
+    match client.delete_item(delete_id, verbose).await {
         Ok(_) => {
             println!("✅ Item deleted successfully!");
         }
@@ -152,6 +153,7 @@ async fn delete_by_id(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn delete_by_criteria(
     client: &MondayClient,
     user: &MondayUser,
@@ -234,13 +236,11 @@ async fn delete_by_criteria(
             }
         }
 
-        if verbose {
-            if is_user_item && item_date == normalized_date {
-                println!(
-                    "  Checking item: date={}, customer='{}', work_item='{}'",
-                    item_date, item_customer, item_work_item
-                );
-            }
+        if verbose && is_user_item && item_date == normalized_date {
+            println!(
+                "  Checking item: date={}, customer='{}', work_item='{}'",
+                item_date, item_customer, item_work_item
+            );
         }
 
         // Check if all criteria match
@@ -347,7 +347,7 @@ fn extract_column_value(item: &crate::monday::Item, column_id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::monday::{Board, ColumnValue, Group, Item, ItemsPage};
+    use crate::monday::{ColumnValue, Item};
 
     // Helper function to create a test user
     fn create_test_user() -> MondayUser {
@@ -538,7 +538,7 @@ mod tests {
 
     #[test]
     fn test_extract_column_value_complex_json() {
-        let mut item = Item {
+        let item = Item {
             id: Some("123".to_string()),
             name: Some("Test".to_string()),
             column_values: vec![ColumnValue {

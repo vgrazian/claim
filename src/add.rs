@@ -10,6 +10,7 @@ use serde_json::json;
 use std::io;
 use tokio::time;
 
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_add_command(
     client: &MondayClient,
     user: &MondayUser,
@@ -291,6 +292,7 @@ pub async fn handle_add_command(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn create_items_on_monday(
     client: &MondayClient,
     actual_dates: &[NaiveDate],
@@ -401,11 +403,7 @@ async fn create_items_on_monday(
             .await
         {
             Ok(item_id) => {
-                if verbose {
-                    println!("✅ Successfully created item with ID: {}", item_id);
-                } else {
-                    println!("✅ Successfully created item with ID: {}", item_id);
-                }
+                println!("✅ Successfully created item with ID: {}", item_id);
                 successful_creations += 1;
             }
             Err(e) => {
@@ -433,6 +431,7 @@ async fn create_items_on_monday(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn show_graphql_mutations(
     actual_dates: &[NaiveDate],
     activity_type_value: &u8,
@@ -525,6 +524,7 @@ mutation {{
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn show_equivalent_command(
     date: &str,
     activity_type: &str,
@@ -587,6 +587,7 @@ fn show_equivalent_command(
     println!("   {}", command_parts.join(" "));
 }
 
+#[allow(clippy::type_complexity)]
 fn prompt_for_claim_details(
     cache: &EntryCache,
 ) -> Result<(
@@ -828,7 +829,7 @@ fn prompt_for_claim_details(
 // all normalize to "work_reduction"
 fn normalize_activity_type_input(input: &str) -> String {
     // First normalize: lowercase, spaces→underscores, hyphens→underscores
-    let normalized = input.to_lowercase().replace(' ', "_").replace('-', "_");
+    let normalized = input.to_lowercase().replace([' ', '-'], "_");
 
     // Then handle common variations and aliases
     match normalized.as_str() {
@@ -901,6 +902,7 @@ fn extract_date_from_item(item: &crate::monday::Item) -> Option<NaiveDate> {
 }
 
 // Helper function to prompt with preselected customer and work item
+#[allow(clippy::type_complexity)]
 fn prompt_with_preselected_entry(
     customer: Option<String>,
     work_item: Option<String>,
@@ -956,50 +958,48 @@ fn prompt_with_preselected_entry(
 
     let activity_type = if activity_type.is_empty() {
         None
-    } else {
-        if let Ok(num) = activity_type.parse::<u8>() {
-            match num {
-                0 => Some("vacation".to_string()),
-                1 => Some("billable".to_string()),
-                2 => Some("holding".to_string()),
-                3 => Some("education".to_string()),
-                4 => Some("work_reduction".to_string()),
-                5 => Some("tbd".to_string()),
-                6 => Some("holiday".to_string()),
-                7 => Some("presales".to_string()),
-                8 => Some("illness".to_string()),
-                9 => Some("paid_not_worked".to_string()),
-                10 => Some("intellectual_capital".to_string()),
-                11 => Some("business_development".to_string()),
-                12 => Some("overhead".to_string()),
-                _ => {
-                    println!("Invalid activity type number. Using default 'billable'.");
-                    Some("billable".to_string())
-                }
+    } else if let Ok(num) = activity_type.parse::<u8>() {
+        match num {
+            0 => Some("vacation".to_string()),
+            1 => Some("billable".to_string()),
+            2 => Some("holding".to_string()),
+            3 => Some("education".to_string()),
+            4 => Some("work_reduction".to_string()),
+            5 => Some("tbd".to_string()),
+            6 => Some("holiday".to_string()),
+            7 => Some("presales".to_string()),
+            8 => Some("illness".to_string()),
+            9 => Some("paid_not_worked".to_string()),
+            10 => Some("intellectual_capital".to_string()),
+            11 => Some("business_development".to_string()),
+            12 => Some("overhead".to_string()),
+            _ => {
+                println!("Invalid activity type number. Using default 'billable'.");
+                Some("billable".to_string())
             }
-        } else {
-            let normalized_type = normalize_activity_type_input(&activity_type);
-            match normalized_type.as_str() {
-                "vacation" | "0" => Some("vacation".to_string()),
-                "billable" | "1" => Some("billable".to_string()),
-                "holding" | "2" => Some("holding".to_string()),
-                "education" | "3" => Some("education".to_string()),
-                "work_reduction" | "4" => Some("work_reduction".to_string()),
-                "tbd" | "5" => Some("tbd".to_string()),
-                "holiday" | "6" => Some("holiday".to_string()),
-                "presales" | "7" => Some("presales".to_string()),
-                "illness" | "8" => Some("illness".to_string()),
-                "paid_not_worked" | "9" => Some("paid_not_worked".to_string()),
-                "intellectual_capital" | "10" => Some("intellectual_capital".to_string()),
-                "business_development" | "11" => Some("business_development".to_string()),
-                "overhead" | "12" => Some("overhead".to_string()),
-                _ => {
-                    println!(
-                        "❌ Error: Unknown activity type '{}'. Please use a valid number or name.",
-                        activity_type
-                    );
-                    return Err(anyhow!("Unknown activity type: {}", activity_type));
-                }
+        }
+    } else {
+        let normalized_type = normalize_activity_type_input(&activity_type);
+        match normalized_type.as_str() {
+            "vacation" | "0" => Some("vacation".to_string()),
+            "billable" | "1" => Some("billable".to_string()),
+            "holding" | "2" => Some("holding".to_string()),
+            "education" | "3" => Some("education".to_string()),
+            "work_reduction" | "4" => Some("work_reduction".to_string()),
+            "tbd" | "5" => Some("tbd".to_string()),
+            "holiday" | "6" => Some("holiday".to_string()),
+            "presales" | "7" => Some("presales".to_string()),
+            "illness" | "8" => Some("illness".to_string()),
+            "paid_not_worked" | "9" => Some("paid_not_worked".to_string()),
+            "intellectual_capital" | "10" => Some("intellectual_capital".to_string()),
+            "business_development" | "11" => Some("business_development".to_string()),
+            "overhead" | "12" => Some("overhead".to_string()),
+            _ => {
+                println!(
+                    "❌ Error: Unknown activity type '{}'. Please use a valid number or name.",
+                    activity_type
+                );
+                return Err(anyhow!("Unknown activity type: {}", activity_type));
             }
         }
     };

@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use chrono::{Datelike, Local, NaiveDate};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::cache::EntryCache;
 use crate::monday::{Item, MondayClient, MondayUser};
@@ -94,6 +94,7 @@ pub struct App {
     /// ID of entry being edited (None for add mode)
     pub editing_entry_id: Option<String>,
     /// Week start for data loading
+    #[allow(dead_code)]
     pub week_start: NaiveDate,
     /// Selected row index in report mode (None means no selection)
     pub selected_report_row: Option<usize>,
@@ -455,12 +456,10 @@ impl App {
                         .contains(crossterm::event::KeyModifiers::SHIFT)
                     {
                         form.previous_field();
+                    } else if form.focus_on_cache {
+                        form.focus_on_cache = false;
                     } else {
-                        if form.focus_on_cache {
-                            form.focus_on_cache = false;
-                        } else {
-                            form.toggle_focus();
-                        }
+                        form.toggle_focus();
                     }
                 }
                 KeyCode::Left => {
@@ -627,12 +626,10 @@ impl App {
                         .contains(crossterm::event::KeyModifiers::SHIFT)
                     {
                         form.previous_field();
+                    } else if form.focus_on_cache {
+                        form.focus_on_cache = false;
                     } else {
-                        if form.focus_on_cache {
-                            form.focus_on_cache = false;
-                        } else {
-                            form.toggle_focus();
-                        }
+                        form.toggle_focus();
                     }
                 }
                 KeyCode::Left => {
@@ -845,7 +842,7 @@ impl App {
 
     /// Navigate to previous week
     async fn previous_week(&mut self) -> Result<()> {
-        self.current_week_start = self.current_week_start - chrono::Duration::days(7);
+        self.current_week_start -= chrono::Duration::days(7);
         self.selected_day = Some(self.current_week_start);
         self.selected_entry_index = None;
         self.load_week_data().await
@@ -853,7 +850,7 @@ impl App {
 
     /// Navigate to next week
     async fn next_week(&mut self) -> Result<()> {
-        self.current_week_start = self.current_week_start + chrono::Duration::days(7);
+        self.current_week_start += chrono::Duration::days(7);
         self.selected_day = Some(self.current_week_start);
         self.selected_entry_index = None;
         self.load_week_data().await
@@ -937,6 +934,7 @@ impl App {
     }
 
     /// Get total hours for the current week
+    #[allow(dead_code)]
     pub fn get_week_total_hours(&self) -> f64 {
         self.claims.iter().map(|e| e.hours).sum()
     }
@@ -997,6 +995,7 @@ impl App {
     }
 
     /// Get the currently selected entry for editing
+    #[allow(dead_code)]
     pub fn get_selected_entry(&self) -> Option<&ClaimEntry> {
         if let Some(day) = self.selected_day {
             if let Some(idx) = self.selected_entry_index {
@@ -1121,6 +1120,7 @@ impl App {
     }
 
     /// Reload data from Monday.com
+    #[allow(dead_code)]
     async fn load_data(&mut self) -> Result<()> {
         self.loading = true;
 

@@ -58,11 +58,13 @@ pub fn get_activity_type_by_number(number: u8) -> Option<&'static str> {
 }
 
 /// Check if a character is a valid activity type number
+#[allow(dead_code)]
 pub fn is_valid_activity_number(c: char) -> bool {
-    matches!(c, '0'..='9')
+    c.is_ascii_digit()
 }
 
 /// Parse activity type number from char
+#[allow(dead_code)]
 pub fn parse_activity_number(c: char) -> Option<u8> {
     c.to_digit(10).map(|d| d as u8)
 }

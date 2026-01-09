@@ -14,6 +14,7 @@ use tokio::task;
 const CUSTOMER_COLUMN_ID: &str = "text__1";
 const WORK_ITEM_COLUMN_ID: &str = "text8__1";
 
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_query_command(
     client: &MondayClient,
     user: &MondayUser,
@@ -203,13 +204,11 @@ pub async fn handle_query_command(
         })
         .collect();
 
-    if verbose {
-        if customer.is_some() || work_item.is_some() {
-            println!(
-                "After client-side filtering: {} items",
-                filtered_items.len()
-            );
-        }
+    if verbose && (customer.is_some() || work_item.is_some()) {
+        println!(
+            "After client-side filtering: {} items",
+            filtered_items.len()
+        );
     }
 
     // Determine if we have exact matches
@@ -321,20 +320,18 @@ pub async fn handle_query_command(
                     end_date
                 );
             }
-        } else {
-            if has_exact_matches {
-                println!(
-                    "\n✅ Found {} total items matching date filter: {}",
-                    filtered_items_len,
-                    query_date.format("%Y-%m-%d")
-                );
-            } else if filtered_items_len > 0 {
-                println!(
-                    "\n⚠️  Showing {} items near date: {}",
-                    filtered_items_len,
-                    query_date.format("%Y-%m-%d")
-                );
-            }
+        } else if has_exact_matches {
+            println!(
+                "\n✅ Found {} total items matching date filter: {}",
+                filtered_items_len,
+                query_date.format("%Y-%m-%d")
+            );
+        } else if filtered_items_len > 0 {
+            println!(
+                "\n⚠️  Showing {} items near date: {}",
+                filtered_items_len,
+                query_date.format("%Y-%m-%d")
+            );
         }
     }
 
@@ -354,14 +351,12 @@ pub async fn handle_query_command(
                     end_date
                 );
             }
-        } else {
-            if has_exact_matches && filtered_items_len > 0 {
-                println!(
-                    "\n✅ Found {} total items matching date filter: {}",
-                    filtered_items_len,
-                    query_date.format("%Y-%m-%d")
-                );
-            }
+        } else if has_exact_matches && filtered_items_len > 0 {
+            println!(
+                "\n✅ Found {} total items matching date filter: {}",
+                filtered_items_len,
+                query_date.format("%Y-%m-%d")
+            );
         }
     }
 
@@ -405,8 +400,9 @@ fn start_walking_dog_animation() -> tokio::task::JoinHandle<()> {
             io::stdout().flush().unwrap();
 
             // Check if we should stop (every 100ms)
-            if let Ok(_) =
-                tokio::time::timeout(Duration::from_millis(100), std::future::pending::<()>()).await
+            if (tokio::time::timeout(Duration::from_millis(100), std::future::pending::<()>())
+                .await)
+                .is_ok()
             {
                 break;
             }
@@ -463,12 +459,10 @@ fn is_item_matching_date(item: &Item, target_date: &str) -> bool {
                     if text == target_date {
                         return true;
                     }
-                    if text.starts_with(target_date) {
-                        if text.len() >= target_date.len() {
-                            let date_part = &text[..target_date.len()];
-                            if date_part == target_date {
-                                return true;
-                            }
+                    if text.starts_with(target_date) && text.len() >= target_date.len() {
+                        let date_part = &text[..target_date.len()];
+                        if date_part == target_date {
+                            return true;
                         }
                     }
                 }
@@ -653,10 +647,7 @@ fn display_simplified_table(
             if let Ok(item_date) = chrono::NaiveDate::parse_from_str(&item_date_str, "%Y-%m-%d") {
                 // Only include items that exactly match dates in the range
                 if date_range.contains(&item_date) {
-                    items_by_date
-                        .entry(item_date_str)
-                        .or_insert_with(Vec::new)
-                        .push(item);
+                    items_by_date.entry(item_date_str).or_default().push(item);
                 }
             }
         }
@@ -723,11 +714,11 @@ fn display_simplified_table(
     }
 
     // Show message if we have items but they don't match the exact date range
-    if items.len() > 0 && displayed_items == 0 {
+    if !items.is_empty() && displayed_items == 0 {
         // Find the closest future date
         let mut future_dates: Vec<NaiveDate> = items
             .iter()
-            .filter_map(|item| extract_item_date(item))
+            .filter_map(extract_item_date)
             .filter_map(|date_str| chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d").ok())
             .filter(|item_date| *item_date > *date_range.last().unwrap())
             .collect();
@@ -749,6 +740,7 @@ fn display_simplified_table(
 }
 
 // Helper function to display detailed items (original format) - UPDATED to show comments
+#[allow(clippy::too_many_arguments)]
 fn display_detailed_items(
     items: &[Item],
     filter_date: Option<NaiveDate>,
@@ -768,7 +760,7 @@ fn display_detailed_items(
             // Find the next available date after the filter date
             let mut future_dates: Vec<NaiveDate> = items
                 .iter()
-                .filter_map(|item| extract_item_date(item))
+                .filter_map(extract_item_date)
                 .filter_map(|date_str| {
                     chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d").ok()
                 })

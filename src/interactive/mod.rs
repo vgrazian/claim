@@ -16,7 +16,7 @@ pub mod ui;
 pub mod utils;
 pub mod week_view;
 
-pub use app::{App, AppMode};
+pub use app::App;
 pub use events::EventHandler;
 
 use anyhow::Result;
@@ -72,7 +72,7 @@ async fn run_app<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     app: &mut App,
 ) -> Result<()> {
-    let mut event_handler = EventHandler::new();
+    let event_handler = EventHandler::new();
 
     loop {
         // Draw UI

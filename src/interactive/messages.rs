@@ -16,6 +16,7 @@ pub enum MessageType {
 pub struct Message {
     pub message_type: MessageType,
     pub text: String,
+    #[allow(dead_code)]
     pub timestamp: Instant,
 }
 
@@ -30,6 +31,7 @@ impl Message {
     }
 
     /// Check if the message has expired (older than 10 seconds)
+    #[allow(dead_code)]
     pub fn is_expired(&self) -> bool {
         self.timestamp.elapsed() > Duration::from_secs(10)
     }

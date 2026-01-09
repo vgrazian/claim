@@ -74,6 +74,7 @@ pub fn init() {
 /// // Initialize with file logging
 /// logging::init_with_file("claim.log").expect("Failed to initialize logging");
 /// ```
+#[allow(dead_code)]
 pub fn init_with_file(log_file_name: &str) -> Result<(), Box<dyn std::error::Error>> {
     use tracing_appender::rolling::{RollingFileAppender, Rotation};
 
@@ -108,6 +109,7 @@ pub fn init_with_file(log_file_name: &str) -> Result<(), Box<dyn std::error::Err
 ///
 /// This sets up minimal logging suitable for test environments.
 /// Only errors and warnings are shown by default.
+#[allow(dead_code)]
 pub fn init_test() {
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("error"));
 

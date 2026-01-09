@@ -1,6 +1,6 @@
 //! Week view component for displaying claims
 
-use chrono::{Datelike, NaiveDate};
+use chrono::Datelike;
 use ratatui::{
     layout::{Constraint, Rect},
     style::{Color, Modifier, Style},

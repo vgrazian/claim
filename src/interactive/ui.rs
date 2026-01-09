@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table},
+    widgets::{Block, Borders, Cell, Paragraph, Row},
     Frame,
 };
 
@@ -240,6 +240,7 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
 }
 
 /// Render the cache panel showing recent entries
+#[allow(dead_code)]
 fn render_cache_panel(f: &mut Frame, app: &App, area: Rect) {
     let entries = app.cache.get_unique_entries();
 
