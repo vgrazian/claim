@@ -1,6 +1,27 @@
+# Build artifacts
 /target
 /Cargo.lock
 **/*.rs.bk
-/note.md
-/.DS_Store
+
+# IDE and editor files
 .vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Log files
+*.log
+
+# Project-specific
+/note.md
+
+# Temporary files
+*.tmp
+*.temp
+.*.swp
+
+# OS-specific
+Thumbs.db
+desktop.ini
