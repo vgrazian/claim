@@ -158,7 +158,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
 }
 
 /// Format an entry for display in a cell
-fn format_entry_cell(entry: &ClaimEntry, is_selected: bool) -> Cell {
+fn format_entry_cell(entry: &ClaimEntry, is_selected: bool) -> Cell<'_> {
     let activity_type = truncate_str(&entry.activity_type, 12);
     let customer = truncate_str(&entry.customer, 12);
     let work_item = truncate_str(&entry.work_item, 12);
