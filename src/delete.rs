@@ -343,3 +343,348 @@ fn extract_column_value(item: &crate::monday::Item, column_id: &str) -> String {
     }
     "".to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::monday::{Board, ColumnValue, Group, Item, ItemsPage};
+
+    // Helper function to create a test user
+    fn create_test_user() -> MondayUser {
+        MondayUser {
+            id: 12345,
+            name: "Test User".to_string(),
+            email: "test@example.com".to_string(),
+        }
+    }
+
+    // Helper function to create a test item
+    fn create_test_item(id: &str, date: &str, customer: &str, work_item: &str) -> Item {
+        Item {
+            id: Some(id.to_string()),
+            name: Some("Test Item".to_string()),
+            column_values: vec![
+                ColumnValue {
+                    id: Some("date4".to_string()),
+                    value: Some(format!(r#"{{"date":"{}"}}"#, date)),
+                    text: Some(date.to_string()),
+                },
+                ColumnValue {
+                    id: Some("text__1".to_string()),
+                    value: Some(customer.to_string()),
+                    text: Some(customer.to_string()),
+                },
+                ColumnValue {
+                    id: Some("text8__1".to_string()),
+                    value: Some(work_item.to_string()),
+                    text: Some(work_item.to_string()),
+                },
+                ColumnValue {
+                    id: Some("person".to_string()),
+                    value: Some(
+                        r#"{"personsAndTeams":[{"id":12345,"kind":"person"}]}"#.to_string(),
+                    ),
+                    text: None,
+                },
+                ColumnValue {
+                    id: Some("status".to_string()),
+                    value: Some(r#"{"index":1}"#.to_string()),
+                    text: Some("billable".to_string()),
+                },
+                ColumnValue {
+                    id: Some("numbers__1".to_string()),
+                    value: Some("8".to_string()),
+                    text: Some("8".to_string()),
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn test_extract_column_value_text() {
+        let item = create_test_item("123", "2025-01-15", "ACME Corp", "PROJ-001");
+
+        let customer = extract_column_value(&item, "text__1");
+        assert_eq!(customer, "ACME Corp");
+
+        let work_item = extract_column_value(&item, "text8__1");
+        assert_eq!(work_item, "PROJ-001");
+    }
+
+    #[test]
+    fn test_extract_column_value_missing() {
+        let item = create_test_item("123", "2025-01-15", "ACME Corp", "PROJ-001");
+
+        let missing = extract_column_value(&item, "nonexistent_column");
+        assert_eq!(missing, "");
+    }
+
+    #[test]
+    fn test_extract_column_value_empty() {
+        let mut item = create_test_item("123", "2025-01-15", "ACME Corp", "PROJ-001");
+        item.column_values.push(ColumnValue {
+            id: Some("empty_col".to_string()),
+            value: Some("".to_string()),
+            text: None,
+        });
+
+        let empty = extract_column_value(&item, "empty_col");
+        assert_eq!(empty, "");
+    }
+
+    #[test]
+    fn test_extract_column_value_null() {
+        let mut item = create_test_item("123", "2025-01-15", "ACME Corp", "PROJ-001");
+        item.column_values.push(ColumnValue {
+            id: Some("null_col".to_string()),
+            value: Some("null".to_string()),
+            text: None,
+        });
+
+        let null_val = extract_column_value(&item, "null_col");
+        assert_eq!(null_val, "");
+    }
+
+    #[test]
+    fn test_extract_column_value_json_string() {
+        let mut item = create_test_item("123", "2025-01-15", "ACME Corp", "PROJ-001");
+        item.column_values.push(ColumnValue {
+            id: Some("json_col".to_string()),
+            value: Some(r#""test_value""#.to_string()),
+            text: None,
+        });
+
+        let json_val = extract_column_value(&item, "json_col");
+        assert_eq!(json_val, "test_value");
+    }
+
+    #[test]
+    fn test_extract_column_value_uses_text_fallback() {
+        let mut item = create_test_item("123", "2025-01-15", "ACME Corp", "PROJ-001");
+        item.column_values.push(ColumnValue {
+            id: Some("text_col".to_string()),
+            value: None,
+            text: Some("fallback_text".to_string()),
+        });
+
+        let text_val = extract_column_value(&item, "text_col");
+        assert_eq!(text_val, "fallback_text");
+    }
+
+    #[tokio::test]
+    async fn test_handle_delete_command_missing_id_and_criteria() {
+        let client = MondayClient::new("test_key".to_string());
+        let user = create_test_user();
+
+        let result =
+            handle_delete_command(&client, &user, "2025", None, None, None, None, false, false)
+                .await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("You must provide either"));
+        assert!(err_msg.contains("Item ID"));
+        assert!(err_msg.contains("Date"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_delete_command_partial_criteria() {
+        let client = MondayClient::new("test_key".to_string());
+        let user = create_test_user();
+
+        // Only date provided
+        let result = handle_delete_command(
+            &client,
+            &user,
+            "2025",
+            None,
+            Some("2025-01-15".to_string()),
+            None,
+            None,
+            false,
+            false,
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("You must provide either"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_delete_command_both_id_and_criteria() {
+        let client = MondayClient::new("test_key".to_string());
+        let user = create_test_user();
+
+        let result = handle_delete_command(
+            &client,
+            &user,
+            "2025",
+            Some("123".to_string()),
+            Some("2025-01-15".to_string()),
+            Some("ACME".to_string()),
+            Some("PROJ-001".to_string()),
+            false,
+            false,
+        )
+        .await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Cannot specify both"));
+    }
+
+    #[test]
+    fn test_extract_column_value_complex_json() {
+        let mut item = Item {
+            id: Some("123".to_string()),
+            name: Some("Test".to_string()),
+            column_values: vec![ColumnValue {
+                id: Some("complex".to_string()),
+                value: Some(r#"{"nested":{"value":"deep"}}"#.to_string()),
+                text: None,
+            }],
+        };
+
+        // Should return the raw JSON string since it's not a simple string
+        let val = extract_column_value(&item, "complex");
+        assert!(val.contains("nested"));
+    }
+
+    #[test]
+    fn test_extract_column_value_date_format() {
+        let item = create_test_item("123", "2025-01-15", "ACME", "PROJ");
+
+        // The date column should have the JSON format
+        let date_col = item
+            .column_values
+            .iter()
+            .find(|c| c.id.as_deref() == Some("date4"))
+            .unwrap();
+
+        assert!(date_col.value.as_ref().unwrap().contains("date"));
+        assert!(date_col.value.as_ref().unwrap().contains("2025-01-15"));
+    }
+
+    #[test]
+    fn test_extract_column_value_person_format() {
+        let item = create_test_item("123", "2025-01-15", "ACME", "PROJ");
+
+        // The person column should have the JSON format with user ID
+        let person_col = item
+            .column_values
+            .iter()
+            .find(|c| c.id.as_deref() == Some("person"))
+            .unwrap();
+
+        assert!(person_col.value.as_ref().unwrap().contains("12345"));
+        assert!(person_col
+            .value
+            .as_ref()
+            .unwrap()
+            .contains("personsAndTeams"));
+    }
+
+    #[test]
+    fn test_extract_column_value_status_format() {
+        let item = create_test_item("123", "2025-01-15", "ACME", "PROJ");
+
+        // The status column should have the JSON format with index
+        let status_col = item
+            .column_values
+            .iter()
+            .find(|c| c.id.as_deref() == Some("status"))
+            .unwrap();
+
+        assert!(status_col.value.as_ref().unwrap().contains("index"));
+        assert_eq!(status_col.text.as_deref(), Some("billable"));
+    }
+
+    #[test]
+    fn test_extract_column_value_numbers() {
+        let item = create_test_item("123", "2025-01-15", "ACME", "PROJ");
+
+        let hours = extract_column_value(&item, "numbers__1");
+        assert_eq!(hours, "8");
+    }
+
+    #[test]
+    fn test_extract_column_value_case_sensitivity() {
+        let item = create_test_item("123", "2025-01-15", "ACME Corp", "PROJ-001");
+
+        // Column IDs should be case-sensitive
+        let val1 = extract_column_value(&item, "text__1");
+        let val2 = extract_column_value(&item, "TEXT__1");
+
+        assert_eq!(val1, "ACME Corp");
+        assert_eq!(val2, ""); // Different case should not match
+    }
+
+    #[test]
+    fn test_extract_column_value_whitespace() {
+        let mut item = create_test_item("123", "2025-01-15", "ACME", "PROJ");
+        item.column_values.push(ColumnValue {
+            id: Some("whitespace".to_string()),
+            value: Some("  trimmed  ".to_string()),
+            text: None,
+        });
+
+        let val = extract_column_value(&item, "whitespace");
+        // Should return the value as-is (not trimmed)
+        assert_eq!(val, "  trimmed  ");
+    }
+
+    #[test]
+    fn test_extract_column_value_special_characters() {
+        let mut item = create_test_item("123", "2025-01-15", "ACME", "PROJ");
+        item.column_values.push(ColumnValue {
+            id: Some("special".to_string()),
+            value: Some("Test & Co. <tag>".to_string()),
+            text: None,
+        });
+
+        let val = extract_column_value(&item, "special");
+        assert_eq!(val, "Test & Co. <tag>");
+    }
+
+    #[test]
+    fn test_extract_column_value_unicode() {
+        let mut item = create_test_item("123", "2025-01-15", "ACME", "PROJ");
+        item.column_values.push(ColumnValue {
+            id: Some("unicode".to_string()),
+            value: Some("Café ☕ 日本語".to_string()),
+            text: None,
+        });
+
+        let val = extract_column_value(&item, "unicode");
+        assert_eq!(val, "Café ☕ 日本語");
+    }
+
+    #[test]
+    fn test_extract_column_value_empty_column_values() {
+        let item = Item {
+            id: Some("123".to_string()),
+            name: Some("Test".to_string()),
+            column_values: vec![],
+        };
+
+        let val = extract_column_value(&item, "any_column");
+        assert_eq!(val, "");
+    }
+
+    #[test]
+    fn test_extract_column_value_multiple_same_id() {
+        let mut item = create_test_item("123", "2025-01-15", "ACME", "PROJ");
+        // Add duplicate column ID (should return first match)
+        item.column_values.push(ColumnValue {
+            id: Some("text__1".to_string()),
+            value: Some("Second Value".to_string()),
+            text: None,
+        });
+
+        let val = extract_column_value(&item, "text__1");
+        assert_eq!(val, "ACME"); // Should return first match
+    }
+}
