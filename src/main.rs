@@ -2,12 +2,19 @@ mod add;
 mod cache;
 mod config;
 mod delete;
+mod error;
 mod interactive;
+mod logging;
 mod monday;
 mod query;
 mod selenium;
 mod time;
 mod utils;
+
+// Re-export error types for convenience
+pub use error::{ApiError, ClaimError, ConfigError, ValidationError};
+// Re-export logging for external use
+pub use logging::init as init_logging;
 
 use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
@@ -123,6 +130,11 @@ enum Commands {
 
 #[tokio::main]
 async fn main() {
+    // Initialize logging (controlled by RUST_LOG environment variable)
+    logging::init();
+
+    tracing::debug!("Application starting");
+
     let cli = Cli::parse();
 
     match run(cli).await {
