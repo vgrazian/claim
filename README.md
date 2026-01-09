@@ -86,6 +86,7 @@ The interactive UI provides:
 #### Interactive UI Controls
 
 **Normal Mode:**
+
 - `←/→` or `Tab/Shift+Tab`: Navigate between weeks
 - `↑/↓`: Navigate between days
 - `j/k`: Navigate between entries on selected day
@@ -98,6 +99,7 @@ The interactive UI provides:
 - `q`: Quit application
 
 **Add/Edit Mode:**
+
 - `Tab`: Move to next field
 - `Shift+Tab`: Move to previous field
 - `←/→`: Move cursor within field
@@ -108,12 +110,14 @@ The interactive UI provides:
 - `Esc`: Cancel
 
 **Report Mode:**
+
 - `Tab/Shift+Tab`: Navigate between weeks
 - `↑/↓`: Navigate between report rows
 - `Esc`: Return to normal mode
 - `q`: Quit application
 
 **Features:**
+
 - **Smart caching**: Recently used customers and work items appear in quick-select panel
 - **Visual cursor**: See exactly where you're typing in form fields
 - **Activity type shortcuts**: Press 0-9 to quickly select activity types
@@ -443,93 +447,6 @@ claim delete -D 2025-12-10 -c "TEST" -w "DELETE.ME" -y
 claim delete -x 9971372083 -v
 ```
 
-## EXAMPLES
-
-### Query Examples
-
-**Query claims for a specific date:**
-
-```bash
-claim query -D 2025-09-15
-```
-
-**Query multiple days with weekend skipping:**
-
-```bash
-claim query -D 2025-09-15 -d 7  # Will show 5 business days (skips weekends)
-```
-
-**Query with custom limit and verbose output:**
-
-```bash
-claim query -D 2025-09-01 -d 10 --limit 15 -v
-```
-
-**Query current week:**
-
-```bash
-# Assuming today is Monday, query the current work week
-claim query -d 5
-```
-
-### Add Examples
-
-**Add a single claim entry:**
-
-```bash
-claim add -D 2025-09-23 -c "CUSTOMER_A" -w "PROJ-123" -H 8
-```
-
-**Add multiple days of claims and a comment:**
-
-```bash
-claim add -D 2025-09-23 -c "CUSTOMER_B" -w "TASK-456" -k "a nice comment" -H 6 -d 5
-```
-
-**Add multiple days of claims (full week if starting with monday) wthout confirmation:**
-
-```bash
-claim add -D 2025-09-23 -c "CUSTOMER_B" -w "WI-456" -H 8 -d 5 -y
-```
-
-**Add claim with specific activity type:**
-
-```bash
-claim add -D 2025-09-23 -t vacation -d 3
-```
-
-**Add claim non-interactively:**
-
-```bash
-claim add -D 2025-09-23 -c "CUSTOMER_C" -w "WI-789" -H 4 -y
-```
-
-**Add claim for today with verbose output:**
-
-```bash
-claim add -c "CUSTOMER_D" -w "PROJ-999" -H 7 -v
-```
-
-### Delete Examples
-
-**Delete a claim with confirmation:**
-
-```bash
-claim delete -x 9971372083
-```
-
-**Delete a claim without confirmation:**
-
-```bash
-claim delete -x 9971372083 -y
-```
-
-**Delete with verbose output to see details:**
-
-```bash
-claim delete -x 9971372083 -v
-```
-
 ## CONFIGURATION FILE LOCATION
 
 The API key is stored in a JSON configuration file. The location varies by operating system:
@@ -657,6 +574,7 @@ claim/
 ## DEPENDENCIES
 
 ### Core Dependencies
+
 - **serde** - Serialization/deserialization framework
 - **serde_json** - JSON support for Serde
 - **directories** - Cross-platform directory location handling
@@ -667,6 +585,7 @@ claim/
 - **clap** - Command-line argument parsing
 
 ### Interactive UI Dependencies
+
 - **ratatui** - Terminal UI framework
 - **crossterm** - Cross-platform terminal manipulation
 
