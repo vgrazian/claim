@@ -63,9 +63,13 @@ jobs:
   security-audit:
     name: Security Audit
     runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      security-events: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: rustsec/audit-check@v1
+      - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
