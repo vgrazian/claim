@@ -4,7 +4,7 @@ A command-line application for processing claims with API key authentication.
 
 ## Version
 
-Current version: **0.2.0**
+Current version: **0.2.1**
 
 To check your installed version:
 
