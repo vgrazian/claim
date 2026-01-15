@@ -2,6 +2,9 @@ use anyhow::{anyhow, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Serialize)]
 struct MondayRequest {
@@ -81,9 +84,83 @@ struct MondayError {
     error_code: String,
 }
 
+/// Cache key for in-memory query cache
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+pub struct QueryCacheKey {
+    pub board_id: String,
+    pub group_id: String,
+    pub user_id: i64,
+    pub limit: usize,
+}
+
+/// Cached query data with timestamp
+#[derive(Clone, Debug)]
+struct CachedQueryData {
+    board: Board,
+    items: Vec<Item>,
+    cached_at: Instant,
+}
+
+/// In-memory cache for query results
+pub struct QueryCache {
+    data: Arc<RwLock<HashMap<QueryCacheKey, CachedQueryData>>>,
+    ttl: Duration,
+}
+
+impl QueryCache {
+    pub fn new(ttl_seconds: u64) -> Self {
+        QueryCache {
+            data: Arc::new(RwLock::new(HashMap::new())),
+            ttl: Duration::from_secs(ttl_seconds),
+        }
+    }
+
+    pub fn get(&self, key: &QueryCacheKey) -> Option<(Board, Vec<Item>)> {
+        let cache = self.data.read().ok()?;
+        let cached = cache.get(key)?;
+
+        // Check if expired
+        if cached.cached_at.elapsed() > self.ttl {
+            return None;
+        }
+
+        Some((cached.board.clone(), cached.items.clone()))
+    }
+
+    pub fn set(&self, key: QueryCacheKey, board: Board, items: Vec<Item>) {
+        if let Ok(mut cache) = self.data.write() {
+            cache.insert(
+                key,
+                CachedQueryData {
+                    board,
+                    items,
+                    cached_at: Instant::now(),
+                },
+            );
+        }
+    }
+
+    pub fn invalidate(&self, user_id: i64) {
+        if let Ok(mut cache) = self.data.write() {
+            cache.retain(|k, _| k.user_id != user_id);
+        }
+    }
+
+    pub fn clear(&self) {
+        if let Ok(mut cache) = self.data.write() {
+            cache.clear();
+        }
+    }
+
+    pub fn size(&self) -> usize {
+        self.data.read().map(|c| c.len()).unwrap_or(0)
+    }
+}
+
 pub struct MondayClient {
     client: Client,
     api_key: String,
+    query_cache: QueryCache,
 }
 
 // Custom deserializer to handle both string and integer IDs
@@ -218,9 +295,25 @@ fn parse_item(item_val: &Value) -> Result<Item> {
 
 impl MondayClient {
     pub fn new(api_key: String) -> Self {
+        // Configure HTTP client with connection pooling and optimizations
+        let client = Client::builder()
+            // Connection pooling settings
+            .pool_max_idle_per_host(10) // Reuse up to 10 connections per host
+            .pool_idle_timeout(std::time::Duration::from_secs(90)) // Keep connections alive for 90s
+            // Timeout settings
+            .timeout(std::time::Duration::from_secs(30)) // Overall request timeout
+            .connect_timeout(std::time::Duration::from_secs(10)) // Connection establishment timeout
+            // Keep-alive for connection reuse
+            .tcp_keepalive(std::time::Duration::from_secs(60))
+            // Note: HTTP/2 disabled - Monday.com API has issues with http2_prior_knowledge()
+            // The client will negotiate HTTP/2 automatically if the server supports it
+            .build()
+            .expect("Failed to build HTTP client with optimized settings");
+
         MondayClient {
-            client: Client::new(),
+            client,
             api_key,
+            query_cache: QueryCache::new(300), // 5 minute TTL for in-memory cache
         }
     }
 
@@ -539,6 +632,125 @@ impl MondayClient {
         Ok(board)
     }
 
+    /// Optimized method: Get board structure + items in a single query with caching
+    /// This reduces API calls from 2 to 1 compared to separate get_board_with_groups + query_items calls
+    /// Includes in-memory cache for repeated queries
+    /// Returns (Board, Vec<Item>, cache_hit: bool)
+    pub async fn query_board_with_items_optimized(
+        &self,
+        board_id: &str,
+        group_id: &str,
+        user_id: i64,
+        limit: usize,
+        verbose: bool,
+    ) -> Result<(Board, Vec<Item>, bool)> {
+        // Check cache first
+        let cache_key = QueryCacheKey {
+            board_id: board_id.to_string(),
+            group_id: group_id.to_string(),
+            user_id,
+            limit,
+        };
+
+        if let Some((board, items)) = self.query_cache.get(&cache_key) {
+            if verbose {
+                println!("✓ Cache HIT - using cached data ({} items)", items.len());
+            }
+            return Ok((board, items, true)); // cache hit
+        }
+
+        if verbose {
+            println!("✗ Cache MISS - fetching from API");
+        }
+        let query = format!(
+            r#"
+            {{
+                boards(ids: ["{}"]) {{
+                    id
+                    name
+                    groups(ids: ["{}"]) {{
+                        id
+                        title
+                        items_page(limit: {}) {{
+                            cursor
+                            items {{
+                                id
+                                name
+                                column_values {{
+                                    id
+                                    value
+                                    text
+                                }}
+                            }}
+                        }}
+                    }}
+                }}
+            }}
+            "#,
+            board_id, group_id, limit
+        );
+
+        if verbose {
+            println!("Sending combined board+items query (optimized)");
+            println!("Query:\n{}", query);
+        }
+
+        let request_body = MondayRequest { query };
+        let response = self.send_request(request_body, verbose).await?;
+
+        if verbose {
+            println!(
+                "Combined response: {}",
+                &response[..500.min(response.len())]
+            );
+        }
+
+        // Parse response
+        let monday_response: MondayResponse = serde_json::from_str(&response)
+            .map_err(|e| anyhow!("Failed to parse combined response: {}", e))?;
+
+        // Check for API errors
+        if !monday_response.errors.is_empty() {
+            let error_messages: Vec<String> = monday_response
+                .errors
+                .iter()
+                .map(|e| format!("{} (code: {})", e.message, e.error_code))
+                .collect();
+            return Err(anyhow!(
+                "Monday.com API errors: {}",
+                error_messages.join(", ")
+            ));
+        }
+
+        let board = monday_response
+            .data
+            .and_then(|data| data.boards)
+            .and_then(|mut boards| boards.pop())
+            .ok_or_else(|| anyhow!("No board found with ID {}", board_id))?;
+
+        // Extract items from the board
+        let items = board
+            .groups
+            .as_ref()
+            .and_then(|groups| groups.first())
+            .and_then(|group| group.items_page.as_ref())
+            .map(|page| page.items.clone())
+            .unwrap_or_default();
+
+        if verbose {
+            println!(
+                "✓ Fetched board structure + {} items in single API call",
+                items.len()
+            );
+        }
+
+        // Store in cache for future requests
+        self.query_cache
+            .set(cache_key, board.clone(), items.clone());
+
+        Ok((board, items, false)) // cache miss
+    }
+
     pub async fn create_item_verbose(
         &self,
         board_id: &str,
@@ -771,8 +983,16 @@ impl MondayClient {
                 if !next_cursor_val.is_empty() && all_items.len() < limit {
                     cursor = Some(next_cursor_val);
 
-                    // Add a small delay to avoid rate limiting
-                    tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+                    // OPTIMIZATION #4: Adaptive delay based on pages fetched
+                    // Prevents rate limiting while maintaining good throughput
+                    let delay_ms = if total_pages < 5 {
+                        50 // Fast for small datasets
+                    } else if total_pages < 20 {
+                        100 // Moderate for medium datasets
+                    } else {
+                        200 // Conservative for large datasets
+                    };
+                    tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
                 } else {
                     break;
                 }
@@ -783,7 +1003,7 @@ impl MondayClient {
             // Safety limit
             if total_pages > 100 {
                 if verbose {
-                    println!("Reached safety limit of 100 pages");
+                    println!("⚠ Reached safety limit of 100 pages");
                 }
                 break;
             }
@@ -1179,7 +1399,7 @@ fn manually_parse_response(response: &str) -> Result<MondayResponse, anyhow::Err
 }
 
 // Helper function to filter items by user
-fn is_user_item(item: &Item, user_id: i64) -> bool {
+pub fn is_user_item(item: &Item, user_id: i64) -> bool {
     for col in &item.column_values {
         if let Some(value) = &col.value {
             if let Some(col_id) = &col.id {

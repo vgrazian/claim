@@ -1,5 +1,5 @@
 use crate::cache::EntryCache;
-use crate::monday::{Item, MondayClient, MondayUser};
+use crate::monday::{is_user_item, Item, MondayClient, MondayUser};
 use crate::{
     calculate_working_dates, get_year_group_id, map_activity_value_to_name, normalize_date,
     truncate_string, validate_date,
@@ -8,8 +8,57 @@ use anyhow::Result;
 use chrono::prelude::*;
 use rand::seq::SliceRandom;
 use std::io::{self, Write};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::task;
+
+// Performance metrics structure
+#[derive(Debug)]
+struct QueryMetrics {
+    duration_ms: u64,
+    items_fetched: usize,
+    items_after_filter: usize,
+    api_calls: u32,
+    cache_hit: bool,
+    pages_fetched: u32,
+}
+
+impl QueryMetrics {
+    fn new() -> Self {
+        QueryMetrics {
+            duration_ms: 0,
+            items_fetched: 0,
+            items_after_filter: 0,
+            api_calls: 0,
+            cache_hit: false,
+            pages_fetched: 0,
+        }
+    }
+
+    fn print(&self, verbose: bool) {
+        if verbose {
+            println!("\n📊 Query Performance Metrics:");
+            println!("  ⏱️  Total Duration: {}ms", self.duration_ms);
+            println!("  📥 Items Fetched: {}", self.items_fetched);
+            println!("  ✅ Items After Filter: {}", self.items_after_filter);
+            println!("  🔌 API Calls: {}", self.api_calls);
+            println!(
+                "  💾 Cache Hit: {}",
+                if self.cache_hit { "Yes" } else { "No" }
+            );
+            if self.pages_fetched > 0 {
+                println!("  📄 Pages Fetched: {}", self.pages_fetched);
+            }
+            println!(
+                "  ⚡ Avg Time per Item: {:.2}ms",
+                if self.items_fetched > 0 {
+                    self.duration_ms as f64 / self.items_fetched as f64
+                } else {
+                    0.0
+                }
+            );
+        }
+    }
+}
 
 // Column ID constants
 const CUSTOMER_COLUMN_ID: &str = "text__1";
@@ -125,40 +174,59 @@ pub async fn handle_query_command(
         None
     };
 
-    // Get the current year's group ID
+    // Start performance tracking
+    let query_start = Instant::now();
+    let mut metrics = QueryMetrics::new();
+
+    // Get the current year's group ID - we still need one call to get the group structure
     let current_year = get_current_year().to_string();
     let board = client.get_board_with_groups(board_id, verbose).await?;
     let group_id = get_year_group_id(&board, &current_year);
 
+    metrics.api_calls = 1; // First API call for board structure
+
     if verbose {
         println!("Using group ID: {} for year: {}", group_id, current_year);
     }
-
-    // Convert date_range to strings for the query
-    let date_strings: Vec<String> = date_range
-        .iter()
-        .map(|d| d.format("%Y-%m-%d").to_string())
-        .collect();
-
-    // Use server-side filtering to get items
-    // For multi-day queries, use a high limit to get all items
-    // For single-day queries, respect the user's limit
-    let api_limit = if target_days > 1 { 500 } else { limit };
-
-    let filtered_items = client
-        .query_items_with_filters(
-            board_id,
-            &group_id,
-            user.id,
-            &date_strings,
-            api_limit,
+    // OPTIMIZATION #1: Use combined query to fetch board + items in single API call
+    // OPTIMIZATION #3: In-memory cache - repeated queries return cached results
+    let (_board_with_items, all_items, cache_hit) = client
+        .query_board_with_items_optimized(
+            board_id, &group_id, user.id, 500, // Fetch up to 500 items
             verbose,
         )
         .await?;
 
+    if !cache_hit {
+        metrics.api_calls += 1; // Second API call for items (only if cache miss)
+    }
+    metrics.cache_hit = cache_hit;
+    metrics.items_fetched = all_items.len();
+    if verbose {
+        println!("Fetched {} items from API", all_items.len());
+    }
+
+    // Client-side filtering (server-side filtering doesn't work reliably)
+    // Filter by user, date range, customer, and work item
+    let filtered_items: Vec<Item> = all_items
+        .into_iter()
+        .filter(|item| {
+            // Filter by user
+            is_user_item(item, user.id) &&
+            // Filter by date range
+            is_item_matching_date_range(item, &date_range) &&
+            // Filter by customer if provided
+            matches_filter(item, CUSTOMER_COLUMN_ID, &customer) &&
+            // Filter by work item if provided
+            matches_filter(item, WORK_ITEM_COLUMN_ID, &work_item)
+        })
+        .collect();
+
+    metrics.items_after_filter = filtered_items.len();
+
     if verbose {
         println!(
-            "\n=== Server-side filtered items: {} ===",
+            "After filtering: {} items (user + date + customer + work_item)",
             filtered_items.len()
         );
     }
@@ -185,31 +253,6 @@ pub async fn handle_query_command(
             }
         }
         true
-    }
-
-    // Client-side filtering required because Monday.com API doesn't support filtering by customer and work_item columns in query_params
-    let filtered_items: Vec<Item> = filtered_items
-        .into_iter()
-        .filter(|item| {
-            // Filter by customer if specified
-            if !matches_filter(item, CUSTOMER_COLUMN_ID, &customer) {
-                return false;
-            }
-
-            // Filter by work_item if specified
-            if !matches_filter(item, WORK_ITEM_COLUMN_ID, &work_item) {
-                return false;
-            }
-
-            true
-        })
-        .collect();
-
-    if verbose && (customer.is_some() || work_item.is_some()) {
-        println!(
-            "After client-side filtering: {} items",
-            filtered_items.len()
-        );
     }
 
     // Determine if we have exact matches
@@ -390,6 +433,12 @@ pub async fn handle_query_command(
             }
         }
     }
+
+    // Calculate final metrics
+    metrics.duration_ms = query_start.elapsed().as_millis() as u64;
+
+    // Print performance metrics
+    metrics.print(verbose);
 
     Ok(())
 }
