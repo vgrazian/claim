@@ -305,10 +305,10 @@ impl App {
             }
             // Arrow keys: Navigate days (left/right) and entries (up/down)
             KeyCode::Left => {
-                self.select_previous_day();
+                self.select_previous_day().await?;
             }
             KeyCode::Right => {
-                self.select_next_day();
+                self.select_next_day().await?;
             }
             KeyCode::Up => {
                 self.select_previous_entry();
@@ -874,26 +874,36 @@ impl App {
         self.selected_entry_index = None;
     }
     /// Select the previous day in the week
-    fn select_previous_day(&mut self) {
+    async fn select_previous_day(&mut self) -> Result<()> {
         if let Some(current_day) = self.selected_day {
             let weekday = current_day.weekday().num_days_from_monday();
             if weekday > 0 {
                 self.selected_day = Some(current_day - chrono::Duration::days(1));
                 self.selected_entry_index = None;
+            } else {
+                // At Monday, move to previous week's Friday
+                self.previous_week().await?;
+                self.selected_day = Some(self.current_week_start + chrono::Duration::days(4));
             }
         }
+        Ok(())
     }
 
     /// Select the next day in the week
-    fn select_next_day(&mut self) {
+    async fn select_next_day(&mut self) -> Result<()> {
         if let Some(current_day) = self.selected_day {
             let weekday = current_day.weekday().num_days_from_monday();
             if weekday < 4 {
                 // Friday is day 4
                 self.selected_day = Some(current_day + chrono::Duration::days(1));
                 self.selected_entry_index = None;
+            } else {
+                // At Friday, move to next week's Monday
+                self.next_week().await?;
+                self.selected_day = Some(self.current_week_start);
             }
         }
+        Ok(())
     }
 
     /// Select the previous entry on the current day

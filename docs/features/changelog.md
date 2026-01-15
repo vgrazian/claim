@@ -1,16 +1,24 @@
-# Changes Summary
+# Changelog
 
-## Overview
+## Version 0.2.1
+
+Minor version update with maintenance improvements.
+
+---
+
+## Changes Summary
+
+### Overview
 
 This document summarizes the improvements made to the claim management tool to enhance usability and performance.
 
 ## 1. Automatic Work Item Assignment
 
-### Feature
+### Feature Description
 
 When users select specific activity types, the system now automatically sets the appropriate work item if not manually specified.
 
-### Implementation
+### Implementation Details
 
 - **Location**: [`src/add.rs`](src/add.rs:66-89)
 - **Logic**:
@@ -18,7 +26,7 @@ When users select specific activity types, the system now automatically sets the
   - `intellectual_capital`, `education` → Auto-set to `M.00563`
   - Other activity types → No automatic assignment (user can still specify manually)
 
-### Benefits
+### Key Benefits
 
 - Reduces manual data entry
 - Ensures consistency in work item assignments
@@ -26,11 +34,11 @@ When users select specific activity types, the system now automatically sets the
 
 ## 2. Improved Query Performance with 30-Day Default Range
 
-### Feature
+### Query Performance Feature
 
 Queries now default to the last 30 days instead of just today, significantly improving performance by reducing the amount of data fetched from Monday.com.
 
-### Implementation
+### Query Implementation
 
 - **Location**: [`src/main.rs`](src/main.rs:26-38) and [`src/query.rs`](src/query.rs:24-36)
 - **Changes**:
@@ -38,7 +46,7 @@ Queries now default to the last 30 days instead of just today, significantly imp
   - Default start date changed from "today" to "30 days ago"
   - Users can still override with specific dates or day ranges
 
-### Benefits
+### Performance Benefits
 
 - Faster query execution
 - Reduced API load on Monday.com
@@ -47,17 +55,17 @@ Queries now default to the last 30 days instead of just today, significantly imp
 
 ## 3. Client-Side Date Filtering
 
-### Feature
+### Filtering Feature
 
 The application fetches all items from Monday.com and performs efficient client-side date filtering to show only relevant entries within the specified date range.
 
-### Implementation
+### Filtering Implementation
 
 - **Location**: [`src/query.rs`](src/query.rs:24-36)
 - **Approach**: Fetch all items from the current year group, then filter by date range on the client side
 - **Performance**: The 5-week default window significantly reduces the amount of data that needs to be processed
 
-### Benefits
+### Filtering Benefits
 
 - Reliable filtering that works with Monday.com's API
 - Efficient for typical use cases (5-week window)

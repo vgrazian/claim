@@ -91,15 +91,31 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     // Add daily totals row
     let mut total_cells =
         vec![Cell::from("Daily Total").style(Style::default().add_modifier(Modifier::BOLD))];
-    let mut week_total = 0.0;
+    let mut week_total_with_blanks = 0.0;
 
     for date in &dates {
-        let daily_total: f64 = app
-            .get_entries_for_date(*date)
-            .iter()
-            .map(|e| e.hours)
-            .sum();
-        week_total += daily_total;
+        let entries = app.get_entries_for_date(*date);
+
+        // Calculate daily total, treating vacation/illness without hours as 8 hours
+        let mut daily_total: f64 = 0.0;
+
+        for entry in &entries {
+            if entry.hours > 0.0 {
+                daily_total += entry.hours;
+            } else if entry.activity_type.to_lowercase().contains("vacation")
+                || entry.activity_type.to_lowercase().contains("illness")
+            {
+                // Vacation or illness without hours specified - count as 8 hours
+                daily_total += 8.0;
+            }
+        }
+
+        // For blank days (no entries), calculate as 8 hours for the total with blanks
+        if entries.is_empty() {
+            week_total_with_blanks += 8.0;
+        } else {
+            week_total_with_blanks += daily_total;
+        }
 
         let style = if daily_total >= 8.0 {
             Style::default().fg(Color::Green)
@@ -112,14 +128,22 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         total_cells.push(Cell::from(format_hours(daily_total)).style(style));
     }
 
-    // Add week total
-    total_cells.push(
-        Cell::from(format_hours(week_total)).style(
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-    );
+    // Add week total with error indication if over 40 hours
+    let week_total_style = if week_total_with_blanks > 40.0 {
+        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    };
+
+    let week_total_text = if week_total_with_blanks > 40.0 {
+        format!("{}⚠️", format_hours(week_total_with_blanks))
+    } else {
+        format_hours(week_total_with_blanks)
+    };
+
+    total_cells.push(Cell::from(week_total_text).style(week_total_style));
 
     rows.push(
         Row::new(total_cells)

@@ -9,7 +9,6 @@ Current version: **0.2.1**
 To check your installed version:
 
 ```bash
-claim --version      # Short version
 claim -V            # Short version
 claim --version     # Long version with build date
 ```
@@ -46,7 +45,7 @@ cargo run
 
 **Output:**
 
-```text
+```plaintext
 No API key found. Let's set one up!
 Please enter your API key:
 [your input here]
@@ -183,7 +182,7 @@ claim query -D 2025-09-15 -c CUST1 -w WI.1001 -d 5
 
 **Output for multi-day query:**
 
-```text
+```plaintext
 Running for user id *****, user name ***** *****, email ******** for year ####
 
 === CLAIMS SUMMARY for User ***** ***** ===
@@ -236,7 +235,7 @@ cargo run -- add
 
 **Output:**
 
-```text
+```plaintext
 Running for user id ***, user name *** ***, email *** for year ####
 
 === Add New Claim ===
@@ -326,7 +325,7 @@ claim delete -x 9971372083 -v
 
 **Output:**
 
-```text
+```plaintext
 Running for user id 51921473, user name John Doe, email john.doe@domain.com for year 2025
 
 === Delete Claim Item ===
@@ -467,19 +466,19 @@ The API key is stored in a JSON configuration file. The location varies by opera
 
 ### Linux
 
-```
+```plaintext
 ~/.config/claim/config.json
 ```
 
 ### macOS
 
-```
+```plaintext
 ~/Library/Application Support/com.yourname.claim/config.json
 ```
 
 ### Windows
 
-```
+```plaintext
 C:UsersUsernameAppDataRoamingyournameclaimconfigconfig.json
 ```
 
@@ -507,9 +506,9 @@ If you encounter connection errors:
 
 - Rust and Cargo installed on your system, a linker is also required
 
-### Installing linker on macos
+### Installing linker on macOS
 
- install the Xcode Command Line Tools by running `xcode-select --install` in the Terminal. This provides the necessary C/C++ compiler and linker, which Rust uses to build your project.
+Install the Xcode Command Line Tools by running `xcode-select --install` in the Terminal. This provides the necessary C/C++ compiler and linker, which Rust uses to build your project.
 
 ### Building from Source
 
@@ -554,7 +553,7 @@ cargo run
 
 The project has been refactored into a modular structure:
 
-```
+```plaintext
 claim/
 ├── src/
 │ ├── main.rs              # CLI setup and command routing
@@ -650,31 +649,31 @@ The application maps between human-readable activity types and their correspondi
 
 ### Version 0.2.0 - Enhanced Add Feature
 
-**1. Command Display Enhancement**
+#### 1. Command Display Enhancement
 
 - Modified equivalent command display to position hours (`-H`) and date (`-D`) as the last parameters
 - Improves command readability and consistency
 
-**2. User-Specific Cache Storage**
+#### 2. User-Specific Cache Storage
 
 - Implemented per-user cache storage for client-workitem pairs
 - Each user's recent entries are stored separately using their Monday.com user ID
 - Cache automatically persists across sessions
 
-**3. Smart Recent Pairs Selection**
+#### 3. Smart Recent Pairs Selection
 
 - Interactive add mode now displays the 5 most recently used client-workitem pairs
 - Users can quickly select by entering the corresponding number (1-5)
 - Manual entry still available for new or unlisted pairs
 - Pairs are sorted by most recent usage
 
-**4. Automatic Cache Persistence**
+#### 4. Automatic Cache Persistence
 
 - Query operations automatically save client-workitem pairs to user-specific cache
 - Add operations save used pairs after successful execution
 - Cache updates happen transparently in the background
 
-**5. Version Information**
+#### 5. Version Information
 
 - Added `--version` and `-V` flags to display version information
 - Long version (`--version`) includes build date and time
@@ -707,17 +706,17 @@ For detailed documentation, see the [docs/](docs/) directory:
 
 See [docs/README.md](docs/README.md) for the complete documentation index.
 
----
+## Notes
 
-Pls be patient, Readme is rarely up to date
+Please be patient, README is rarely up to date.
 
 As you got down here you can pet Virgilio the cat:
 
-~~~ text
+```text
  _._     _,-'""`-._
 (,-.`._,'(       |\`-/|
     `-.-' \ )-`( , o o)
           `-    \`_`"'-
-~~~
+```
 
 purr purrr...

@@ -88,7 +88,7 @@ cargo test error::tests
 
 ## 2. Automated Release Distribution
 
-### Overview
+### Release Overview
 
 The project now has automated CI/CD pipelines using GitHub Actions:
 
@@ -149,7 +149,7 @@ Edit `Cargo.toml`:
 ```toml
 [package]
 name = "claim"
-version = "0.2.0"  # Update version
+version = "0.2.1"  # Update version
 edition = "2021"
 ```
 
