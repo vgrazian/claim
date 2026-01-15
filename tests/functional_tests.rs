@@ -23,7 +23,7 @@ mod functional_tests {
 
     // Thread-local storage for tracking entry IDs per test
     thread_local! {
-        static TEST_ENTRY_IDS: std::cell::RefCell<Vec<String>> = std::cell::RefCell::new(Vec::new());
+        static TEST_ENTRY_IDS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
     }
 
     // Generate a unique test identifier based on timestamp

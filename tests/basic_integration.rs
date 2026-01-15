@@ -12,7 +12,7 @@ mod tests {
         // Test that we can access environment variables
         let _home = std::env::var("HOME"); // Prefix with underscore to suppress warning
                                            // This might be None in CI environments, but shouldn't panic
-        assert!(true); // Just test that we can run this code
+                                           // Test passes if we reach this point without panicking
     }
 
     #[test]
@@ -54,10 +54,7 @@ mod tests {
     #[test]
     fn test_vector_operations() {
         // Test basic vector operations
-        let mut vec = Vec::new();
-        vec.push(1);
-        vec.push(2);
-        vec.push(3);
+        let vec = [1, 2, 3];
 
         assert_eq!(vec.len(), 3);
         assert_eq!(vec[0], 1);
@@ -77,7 +74,7 @@ mod tests {
 
         assert!(some_value.is_some());
         assert!(none_value.is_none());
-        assert_eq!(some_value.unwrap(), 42);
+        assert_eq!(some_value, Some(42));
 
         // Test map operation
         let doubled = some_value.map(|x| x * 2);
@@ -95,7 +92,7 @@ mod tests {
 
         assert!(ok_result.is_ok());
         assert!(err_result.is_err());
-        assert_eq!(ok_result.unwrap(), 42);
+        assert_eq!(ok_result, Ok(42));
 
         // Test map operation
         let doubled = ok_result.map(|x| x * 2);

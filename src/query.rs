@@ -1016,9 +1016,11 @@ mod tests {
 
     fn create_test_item_with_date(date: &str) -> Item {
         let mut item = Item::default();
-        let mut date_column = ColumnValue::default();
-        date_column.id = Some("date4".to_string());
-        date_column.value = Some(format!(r#"{{"date": "{}"}}"#, date));
+        let date_column = ColumnValue {
+            id: Some("date4".to_string()),
+            value: Some(format!(r#"{{"date": "{}"}}"#, date)),
+            ..Default::default()
+        };
         item.column_values.push(date_column);
         item
     }
@@ -1031,9 +1033,11 @@ mod tests {
 
         // Test with datetime string
         let mut item_with_time = Item::default();
-        let mut date_column = ColumnValue::default();
-        date_column.id = Some("date4".to_string());
-        date_column.value = Some(r#"{"date": "2025-09-15T00:00:00Z"}"#.to_string());
+        let date_column = ColumnValue {
+            id: Some("date4".to_string()),
+            value: Some(r#"{"date": "2025-09-15T00:00:00Z"}"#.to_string()),
+            ..Default::default()
+        };
         item_with_time.column_values.push(date_column);
         assert!(is_item_matching_date(&item_with_time, "2025-09-15"));
     }
@@ -1041,9 +1045,11 @@ mod tests {
     #[test]
     fn test_is_item_matching_date_with_text() {
         let mut item = Item::default();
-        let mut date_column = ColumnValue::default();
-        date_column.id = Some("date4".to_string());
-        date_column.text = Some("2025-09-15".to_string());
+        let date_column = ColumnValue {
+            id: Some("date4".to_string()),
+            text: Some("2025-09-15".to_string()),
+            ..Default::default()
+        };
         item.column_values.push(date_column);
 
         assert!(is_item_matching_date(&item, "2025-09-15"));
@@ -1077,9 +1083,11 @@ mod tests {
 
         // Test with datetime string
         let mut item_with_time = Item::default();
-        let mut date_column = ColumnValue::default();
-        date_column.id = Some("date4".to_string());
-        date_column.value = Some(r#"{"date": "2025-09-15T12:30:45Z"}"#.to_string());
+        let date_column = ColumnValue {
+            id: Some("date4".to_string()),
+            value: Some(r#"{"date": "2025-09-15T12:30:45Z"}"#.to_string()),
+            ..Default::default()
+        };
         item_with_time.column_values.push(date_column);
         let extracted_date = extract_item_date(&item_with_time);
         assert_eq!(extracted_date, Some("2025-09-15".to_string()));
@@ -1088,9 +1096,11 @@ mod tests {
     #[test]
     fn test_extract_column_value() {
         let mut item = Item::default();
-        let mut text_column = ColumnValue::default();
-        text_column.id = Some(CUSTOMER_COLUMN_ID.to_string());
-        text_column.value = Some("Test Customer".to_string());
+        let text_column = ColumnValue {
+            id: Some(CUSTOMER_COLUMN_ID.to_string()),
+            value: Some("Test Customer".to_string()),
+            ..Default::default()
+        };
         item.column_values.push(text_column);
 
         let extracted_value = extract_column_value(&item, CUSTOMER_COLUMN_ID);
@@ -1100,9 +1110,11 @@ mod tests {
     #[test]
     fn test_extract_comment_value() {
         let mut item = Item::default();
-        let mut comment_column = ColumnValue::default();
-        comment_column.id = Some("text2__1".to_string());
-        comment_column.value = Some("Test comment".to_string());
+        let comment_column = ColumnValue {
+            id: Some("text2__1".to_string()),
+            value: Some("Test comment".to_string()),
+            ..Default::default()
+        };
         item.column_values.push(comment_column);
 
         let extracted_comment = extract_comment_value(&item);
@@ -1112,9 +1124,11 @@ mod tests {
     #[test]
     fn test_extract_status_value() {
         let mut item = Item::default();
-        let mut status_column = ColumnValue::default();
-        status_column.id = Some("status".to_string());
-        status_column.value = Some(r#"{"index": 1}"#.to_string());
+        let status_column = ColumnValue {
+            id: Some("status".to_string()),
+            value: Some(r#"{"index": 1}"#.to_string()),
+            ..Default::default()
+        };
         item.column_values.push(status_column);
 
         let extracted_status = extract_status_value(&item);

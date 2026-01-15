@@ -140,18 +140,21 @@ impl QueryCache {
         }
     }
 
+    #[allow(dead_code)]
     pub fn invalidate(&self, user_id: i64) {
         if let Ok(mut cache) = self.data.write() {
             cache.retain(|k, _| k.user_id != user_id);
         }
     }
 
+    #[allow(dead_code)]
     pub fn clear(&self) {
         if let Ok(mut cache) = self.data.write() {
             cache.clear();
         }
     }
 
+    #[allow(dead_code)]
     pub fn size(&self) -> usize {
         self.data.read().map(|c| c.len()).unwrap_or(0)
     }

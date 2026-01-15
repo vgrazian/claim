@@ -139,11 +139,18 @@ impl EntryCache {
     }
 
     /// Get unique entries (deduplicated by customer + work_item) for a specific user
+    /// Filters out test entries (TEST.DELETE.ME.*)
     pub fn get_unique_entries(&self, user_id: i64) -> Vec<CachedEntry> {
         let mut seen = std::collections::HashSet::new();
         let mut unique = Vec::new();
 
         for entry in self.get_sorted_entries(user_id) {
+            // Filter out test entries
+            if entry.customer.starts_with("TEST") || entry.work_item.starts_with("TEST.DELETE.ME.")
+            {
+                continue;
+            }
+
             let key = (entry.customer.clone(), entry.work_item.clone());
             if seen.insert(key) {
                 unique.push(entry);
@@ -331,7 +338,7 @@ mod tests {
 
         cache.update_from_items(
             TEST_USER_ID,
-            &vec![("Customer A".to_string(), "WI-001".to_string(), date)],
+            &[("Customer A".to_string(), "WI-001".to_string(), date)],
         );
 
         assert_eq!(cache.entries.len(), 1);
