@@ -271,16 +271,15 @@ impl App {
     /// Handle events in normal mode
     async fn handle_normal_mode(&mut self, event: KeyEvent) -> Result<bool> {
         // Check for Cmd+Q (macOS) or Ctrl+Q (Linux/Windows) to exit
-        if event.code == KeyCode::Char('q') || event.code == KeyCode::Char('Q') {
-            if event
+        if (event.code == KeyCode::Char('q') || event.code == KeyCode::Char('Q'))
+            && (event
                 .modifiers
                 .contains(crossterm::event::KeyModifiers::CONTROL)
                 || event
                     .modifiers
-                    .contains(crossterm::event::KeyModifiers::SUPER)
-            {
-                return Ok(false); // Exit application with Cmd+Q or Ctrl+Q
-            }
+                    .contains(crossterm::event::KeyModifiers::SUPER))
+        {
+            return Ok(false); // Exit application with Cmd+Q or Ctrl+Q
         }
 
         match event.code {
