@@ -165,7 +165,7 @@ impl EntryCache {
             return;
         }
 
-        let user_entries = self.entries.entry(user_id).or_insert_with(Vec::new);
+        let user_entries = self.entries.entry(user_id).or_default();
 
         // Check if this entry already exists
         let date_str = date.format("%Y-%m-%d").to_string();

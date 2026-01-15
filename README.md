@@ -7,6 +7,7 @@ A command-line application for processing claims with API key authentication.
 Current version: **0.2.0**
 
 To check your installed version:
+
 ```bash
 claim --version      # Short version
 claim -V            # Short version
@@ -650,26 +651,31 @@ The application maps between human-readable activity types and their correspondi
 ### Version 0.2.0 - Enhanced Add Feature
 
 **1. Command Display Enhancement**
+
 - Modified equivalent command display to position hours (`-H`) and date (`-D`) as the last parameters
 - Improves command readability and consistency
 
 **2. User-Specific Cache Storage**
+
 - Implemented per-user cache storage for client-workitem pairs
 - Each user's recent entries are stored separately using their Monday.com user ID
 - Cache automatically persists across sessions
 
 **3. Smart Recent Pairs Selection**
+
 - Interactive add mode now displays the 5 most recently used client-workitem pairs
 - Users can quickly select by entering the corresponding number (1-5)
 - Manual entry still available for new or unlisted pairs
 - Pairs are sorted by most recent usage
 
 **4. Automatic Cache Persistence**
+
 - Query operations automatically save client-workitem pairs to user-specific cache
 - Add operations save used pairs after successful execution
 - Cache updates happen transparently in the background
 
 **5. Version Information**
+
 - Added `--version` and `-V` flags to display version information
 - Long version (`--version`) includes build date and time
 - Build date automatically captured during compilation
@@ -677,6 +683,7 @@ The application maps between human-readable activity types and their correspondi
 ### Cache Behavior
 
 The cache system now:
+
 - Stores entries per user (identified by Monday.com user ID)
 - Maintains the 5 most recently used client-workitem pairs per user
 - Updates automatically after query and add operations
@@ -686,6 +693,21 @@ The cache system now:
 ### Breaking Changes
 
 None - all changes are backward compatible. Existing cache files will be automatically migrated to the new per-user format.
+
+## Documentation
+
+For detailed documentation, see the [docs/](docs/) directory:
+
+- **[Interactive UI Guide](docs/features/interactive-ui.md)** - Complete guide to the terminal interface
+- **[Cache System](docs/features/cache-system.md)** - Understanding the caching feature
+- **[Testing Guide](docs/development/testing.md)** - Running and writing tests
+- **[Implementation Guide](docs/development/implementation-guide.md)** - Technical details
+- **[Project Analysis](docs/development/project-analysis.md)** - Comprehensive project overview
+- **[Contributing Guide](docs/contributing/markdown-style-guide.md)** - Documentation standards
+
+See [docs/README.md](docs/README.md) for the complete documentation index.
+
+---
 
 Pls be patient, Readme is rarely up to date
 
