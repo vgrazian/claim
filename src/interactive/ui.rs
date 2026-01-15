@@ -242,7 +242,7 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
 /// Render the cache panel showing recent entries
 #[allow(dead_code)]
 fn render_cache_panel(f: &mut Frame, app: &App, area: Rect) {
-    let entries = app.cache.get_unique_entries();
+    let entries = app.cache.get_unique_entries(app.user.id);
 
     // Take the most recent 9 billable entries (already filtered during cache refresh)
     let recent_entries: Vec<_> = entries.iter().take(9).collect();

@@ -157,7 +157,7 @@ fn render_activity_type_panel(f: &mut Frame, current_type: &str, area: Rect) {
 
 /// Render cache panel with selection highlighting
 pub fn render_cache_panel_with_selection(f: &mut Frame, app: &App, area: Rect) {
-    let entries = app.cache.get_unique_entries();
+    let entries = app.cache.get_unique_entries(app.user.id);
     let selected_index = if let Some(form) = &app.form_data {
         if form.focus_on_cache {
             Some(form.selected_cache_index)

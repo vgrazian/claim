@@ -1,3 +1,4 @@
+use crate::cache::EntryCache;
 use crate::monday::{Item, MondayClient, MondayUser};
 use crate::{
     calculate_working_dates, get_year_group_id, map_activity_value_to_name, normalize_date,
@@ -360,7 +361,53 @@ pub async fn handle_query_command(
         }
     }
 
+    // Persist client-workitem pairs to cache after successful query
+    if !filtered_items.is_empty() {
+        let mut cache = EntryCache::load().unwrap_or_else(|_| EntryCache::new());
+
+        // Extract customer and work item pairs from the filtered items
+        let mut entries = Vec::new();
+        for item in &filtered_items {
+            let customer = extract_column_value(item, CUSTOMER_COLUMN_ID);
+            let work_item = extract_column_value(item, WORK_ITEM_COLUMN_ID);
+
+            if !customer.is_empty() && !work_item.is_empty() {
+                // Try to extract date from item
+                if let Some(date) = extract_date_from_item(item) {
+                    entries.push((customer, work_item, date));
+                }
+            }
+        }
+
+        if !entries.is_empty() {
+            cache.update_from_items(user.id, &entries);
+            if let Err(e) = cache.save() {
+                if verbose {
+                    println!("⚠️  Warning: Failed to save cache: {}", e);
+                }
+            } else if verbose {
+                println!("💾 Saved {} entries to cache", entries.len());
+            }
+        }
+    }
+
     Ok(())
+}
+
+/// Extract date from a Monday.com item
+fn extract_date_from_item(item: &Item) -> Option<NaiveDate> {
+    for column in &item.column_values {
+        if let Some(ref id) = column.id {
+            if id == "date4" {
+                if let Some(ref text) = column.text {
+                    if let Ok(date) = NaiveDate::parse_from_str(text, "%Y-%m-%d") {
+                        return Some(date);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 // Improved walking dog animation - simpler and more reliable

@@ -87,13 +87,13 @@ pub async fn handle_add_command(
             println!("Filtered to {} entries within date range", entries.len());
         }
 
-        cache.update_from_items(&entries);
+        cache.update_from_items(user.id, &entries);
         cache.save()?;
 
         if verbose || refresh_cache {
             println!(
                 "✅ Cache refreshed with {} unique entries from {} items in date range",
-                cache.get_unique_entries().len(),
+                cache.get_unique_entries(user.id).len(),
                 entries.len()
             );
         }
@@ -116,7 +116,7 @@ pub async fn handle_add_command(
         && days.is_none()
         && comment.is_none()
     {
-        let (d, at, c, wi, h, d_val, cmt) = prompt_for_claim_details(&cache)?;
+        let (d, at, c, wi, h, d_val, cmt) = prompt_for_claim_details(&cache, user.id)?;
         (d, at, c, wi, h, d_val, cmt, true)
     } else {
         if let Some(ref d) = date {
@@ -274,6 +274,18 @@ pub async fn handle_add_command(
         verbose,
     )
     .await?;
+
+    // Save the used client-workitem pair to cache after successful add
+    if let (Some(ref customer), Some(ref work_item)) = (&final_customer, &final_work_item) {
+        if !customer.is_empty() && !work_item.is_empty() {
+            cache.add_entry(user.id, customer.clone(), work_item.clone(), start_date);
+            if let Err(e) = cache.save() {
+                if verbose {
+                    println!("⚠️  Warning: Failed to save cache: {}", e);
+                }
+            }
+        }
+    }
 
     if is_interactive {
         show_equivalent_command(
@@ -539,7 +551,7 @@ fn show_equivalent_command(
     println!("\n💡 Equivalent command line:");
 
     let mut command_parts = Vec::new();
-    command_parts.push(format!("claim add -D {}", date));
+    command_parts.push("claim add".to_string());
 
     // Only include activity type if it's not the default "billable"
     if activity_type != "billable" {
@@ -565,15 +577,6 @@ fn show_equivalent_command(
         }
     }
 
-    if let Some(h) = hours {
-        command_parts.push(format!("-H {}", h));
-    }
-
-    // Only include days if it's not the default 1.0
-    if (days - 1.0).abs() > f64::EPSILON {
-        command_parts.push(format!("-d {}", days));
-    }
-
     // Include -y flag if it would be needed
     if yes {
         command_parts.push("-y".to_string());
@@ -584,12 +587,25 @@ fn show_equivalent_command(
         command_parts.push("-v".to_string());
     }
 
+    // Position hours and date as last parameters
+    if let Some(h) = hours {
+        command_parts.push(format!("-H {}", h));
+    }
+
+    // Only include days if it's not the default 1.0
+    if (days - 1.0).abs() > f64::EPSILON {
+        command_parts.push(format!("-d {}", days));
+    }
+
+    command_parts.push(format!("-D {}", date));
+
     println!("   {}", command_parts.join(" "));
 }
 
 #[allow(clippy::type_complexity)]
 fn prompt_for_claim_details(
     cache: &EntryCache,
+    user_id: i64,
 ) -> Result<(
     String,
     Option<String>,
@@ -603,11 +619,11 @@ fn prompt_for_claim_details(
 
     println!("\n=== Add New Claim ===");
 
-    // Show cached entries if available
-    let cached_entries = cache.get_unique_entries();
+    // Show cached entries if available (limit to 5 most recent)
+    let cached_entries = cache.get_unique_entries(user_id);
     if !cached_entries.is_empty() {
         println!("\n📋 Recent entries (from last 4 weeks):");
-        for (i, entry) in cached_entries.iter().take(10).enumerate() {
+        for (i, entry) in cached_entries.iter().take(5).enumerate() {
             println!(
                 "  {}. {} | {} (last used: {})",
                 i + 1,

@@ -193,7 +193,7 @@ impl App {
             }
         }
 
-        self.cache.update_from_items(&entries);
+        self.cache.update_from_items(self.user.id, &entries);
         self.cache.save()?;
 
         self.loading = false;
@@ -201,7 +201,7 @@ impl App {
             MessageType::Success,
             format!(
                 "Cache refreshed with {} unique entries",
-                self.cache.get_unique_entries().len()
+                self.cache.get_unique_entries(self.user.id).len()
             ),
         ));
 
@@ -494,7 +494,7 @@ impl App {
                 }
                 KeyCode::Down => {
                     if form.focus_on_cache {
-                        let cache_size = self.cache.get_unique_entries().len();
+                        let cache_size = self.cache.get_unique_entries(self.user.id).len();
                         if form.selected_cache_index < cache_size.saturating_sub(1) {
                             form.selected_cache_index += 1;
                         }
@@ -506,7 +506,7 @@ impl App {
                 KeyCode::Enter => {
                     if form.focus_on_cache {
                         // Apply selected cache entry
-                        let entries = self.cache.get_unique_entries();
+                        let entries = self.cache.get_unique_entries(self.user.id);
                         if let Some(entry) = entries.get(form.selected_cache_index) {
                             form.apply_cache_entry(entry.customer.clone(), entry.work_item.clone());
                         }
@@ -567,7 +567,7 @@ impl App {
                             }
                             super::form::FormField::Customer | super::form::FormField::WorkItem => {
                                 // Select from cache by number
-                                let entries = self.cache.get_unique_entries();
+                                let entries = self.cache.get_unique_entries(self.user.id);
                                 if digit < entries.len() && digit < 10 {
                                     let entry = &entries[digit];
                                     form.apply_cache_entry(
@@ -664,7 +664,7 @@ impl App {
                 }
                 KeyCode::Down => {
                     if form.focus_on_cache {
-                        let cache_size = self.cache.get_unique_entries().len();
+                        let cache_size = self.cache.get_unique_entries(self.user.id).len();
                         if form.selected_cache_index < cache_size.saturating_sub(1) {
                             form.selected_cache_index += 1;
                         }
@@ -676,7 +676,7 @@ impl App {
                 KeyCode::Enter => {
                     if form.focus_on_cache {
                         // Apply selected cache entry
-                        let entries = self.cache.get_unique_entries();
+                        let entries = self.cache.get_unique_entries(self.user.id);
                         if let Some(entry) = entries.get(form.selected_cache_index) {
                             form.apply_cache_entry(entry.customer.clone(), entry.work_item.clone());
                         }
@@ -739,7 +739,7 @@ impl App {
                             }
                             super::form::FormField::Customer | super::form::FormField::WorkItem => {
                                 // Select from cache by number
-                                let entries = self.cache.get_unique_entries();
+                                let entries = self.cache.get_unique_entries(self.user.id);
                                 if digit < entries.len() && digit < 10 {
                                     let entry = &entries[digit];
                                     form.apply_cache_entry(

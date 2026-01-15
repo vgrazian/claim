@@ -25,6 +25,8 @@ use std::process;
 #[derive(Parser)]
 #[command(name = "claim")]
 #[command(about = "Monday.com claim management tool", long_about = None)]
+#[command(long_version = concat!(env!("CARGO_PKG_VERSION"), " (built: ", env!("BUILD_DATE"), ")"))]
+#[command(version)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,

@@ -2,6 +2,17 @@
 
 A command-line application for processing claims with API key authentication.
 
+## Version
+
+Current version: **0.2.0**
+
+To check your installed version:
+```bash
+claim --version      # Short version
+claim -V            # Short version
+claim --version     # Long version with build date
+```
+
 ## NAME
 
 claim - Monday.com claim management tool
@@ -195,7 +206,7 @@ Found 6 items across 5 days
 
 ### add
 
-Add a new claim entry.
+Add a new claim entry with enhanced features including smart caching and command display.
 
 ```bash
 claim add [--date DATE] [--activity-type TYPE] [--customer CUSTOMER] [--work-item WORK_ITEM] [--comment COMMENT] [--hours HOURS] [--days DAYS] [--yes] [--verbose]
@@ -213,8 +224,8 @@ claim add [--date DATE] [--activity-type TYPE] [--customer CUSTOMER] [--work-ite
 - `-y, --yes`: Skip confirmation prompt
 - `-v, --verbose`: Verbose output
 
-**Interactive Mode:**
-If no options are provided, the command runs in interactive mode:
+**Interactive Mode with Smart Caching:**
+If no options are provided, the command runs in interactive mode with access to your 5 most recently used client-workitem pairs:
 
 ```bash
 cargo run -- add
@@ -265,8 +276,10 @@ Creating item for 2025-09-23 (1 of 1)...
 🎉 Successfully created 1 out of 1 items
 
 💡 Equivalent command line:
-   claim add -D 2025-09-23 -c "CUSTOMER NAME" -w "WI.12344" -H 8
+   claim add -c "CUSTOMER NAME" -w "WI.12344" -H 8 -D 2025-09-23
 ```
+
+**Note:** The equivalent command now displays hours and date as the last parameters for better readability.
 
 ### delete
 
@@ -631,6 +644,48 @@ The application maps between human-readable activity types and their correspondi
 | intellectual_capital  | 10    |
 | business_development  | 11    |
 | overhead              | 12    |
+
+## Recent Updates (2026-01-15)
+
+### Version 0.2.0 - Enhanced Add Feature
+
+**1. Command Display Enhancement**
+- Modified equivalent command display to position hours (`-H`) and date (`-D`) as the last parameters
+- Improves command readability and consistency
+
+**2. User-Specific Cache Storage**
+- Implemented per-user cache storage for client-workitem pairs
+- Each user's recent entries are stored separately using their Monday.com user ID
+- Cache automatically persists across sessions
+
+**3. Smart Recent Pairs Selection**
+- Interactive add mode now displays the 5 most recently used client-workitem pairs
+- Users can quickly select by entering the corresponding number (1-5)
+- Manual entry still available for new or unlisted pairs
+- Pairs are sorted by most recent usage
+
+**4. Automatic Cache Persistence**
+- Query operations automatically save client-workitem pairs to user-specific cache
+- Add operations save used pairs after successful execution
+- Cache updates happen transparently in the background
+
+**5. Version Information**
+- Added `--version` and `-V` flags to display version information
+- Long version (`--version`) includes build date and time
+- Build date automatically captured during compilation
+
+### Cache Behavior
+
+The cache system now:
+- Stores entries per user (identified by Monday.com user ID)
+- Maintains the 5 most recently used client-workitem pairs per user
+- Updates automatically after query and add operations
+- Persists to disk in the system cache directory
+- Provides quick selection in interactive add mode
+
+### Breaking Changes
+
+None - all changes are backward compatible. Existing cache files will be automatically migrated to the new per-user format.
 
 Pls be patient, Readme is rarely up to date
 

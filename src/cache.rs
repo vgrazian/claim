@@ -14,18 +14,18 @@ pub struct CachedEntry {
     pub last_used: String, // ISO 8601 date string
 }
 
-/// Cache structure for storing recent entries
+/// Cache structure for storing recent entries per user
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntryCache {
-    pub entries: Vec<CachedEntry>,
-    pub last_updated: String, // ISO 8601 timestamp
+    pub entries: HashMap<i64, Vec<CachedEntry>>, // user_id -> entries
+    pub last_updated: String,                    // ISO 8601 timestamp
 }
 
 impl EntryCache {
     /// Create a new empty cache
     pub fn new() -> Self {
         EntryCache {
-            entries: Vec::new(),
+            entries: HashMap::new(),
             last_updated: Local::now().to_rfc3339(),
         }
     }
@@ -73,24 +73,26 @@ impl EntryCache {
         Ok(())
     }
 
-    /// Add or update entries from query results
+    /// Add or update entries from query results for a specific user
     /// Deduplicates entries and keeps the most recent date
-    pub fn update_from_items(&mut self, items: &[(String, String, NaiveDate)]) {
+    pub fn update_from_items(&mut self, user_id: i64, items: &[(String, String, NaiveDate)]) {
         // Use a HashMap to deduplicate and keep the most recent date
         let mut entry_map: HashMap<(String, String), NaiveDate> = HashMap::new();
 
-        // Add existing entries to the map
-        for entry in &self.entries {
-            if let Ok(date) = NaiveDate::parse_from_str(&entry.last_used, "%Y-%m-%d") {
-                let key = (entry.customer.clone(), entry.work_item.clone());
-                entry_map
-                    .entry(key)
-                    .and_modify(|existing_date| {
-                        if date > *existing_date {
-                            *existing_date = date;
-                        }
-                    })
-                    .or_insert(date);
+        // Add existing entries for this user to the map
+        if let Some(user_entries) = self.entries.get(&user_id) {
+            for entry in user_entries {
+                if let Ok(date) = NaiveDate::parse_from_str(&entry.last_used, "%Y-%m-%d") {
+                    let key = (entry.customer.clone(), entry.work_item.clone());
+                    entry_map
+                        .entry(key)
+                        .and_modify(|existing_date| {
+                            if date > *existing_date {
+                                *existing_date = date;
+                            }
+                        })
+                        .or_insert(date);
+                }
             }
         }
 
@@ -121,23 +123,27 @@ impl EntryCache {
 
         entries.sort_by(|a, b| b.last_used.cmp(&a.last_used));
 
-        self.entries = entries;
+        self.entries.insert(user_id, entries);
         self.last_updated = Local::now().to_rfc3339();
     }
 
-    /// Get entries sorted by most recent first
-    pub fn get_sorted_entries(&self) -> Vec<CachedEntry> {
-        let mut entries = self.entries.clone();
-        entries.sort_by(|a, b| b.last_used.cmp(&a.last_used));
-        entries
+    /// Get entries sorted by most recent first for a specific user
+    pub fn get_sorted_entries(&self, user_id: i64) -> Vec<CachedEntry> {
+        if let Some(user_entries) = self.entries.get(&user_id) {
+            let mut entries = user_entries.clone();
+            entries.sort_by(|a, b| b.last_used.cmp(&a.last_used));
+            entries
+        } else {
+            Vec::new()
+        }
     }
 
-    /// Get unique entries (deduplicated by customer + work_item)
-    pub fn get_unique_entries(&self) -> Vec<CachedEntry> {
+    /// Get unique entries (deduplicated by customer + work_item) for a specific user
+    pub fn get_unique_entries(&self, user_id: i64) -> Vec<CachedEntry> {
         let mut seen = std::collections::HashSet::new();
         let mut unique = Vec::new();
 
-        for entry in self.get_sorted_entries() {
+        for entry in self.get_sorted_entries(user_id) {
             let key = (entry.customer.clone(), entry.work_item.clone());
             if seen.insert(key) {
                 unique.push(entry);
@@ -145,6 +151,45 @@ impl EntryCache {
         }
 
         unique
+    }
+
+    /// Add a single entry for a user (used after successful add operation)
+    pub fn add_entry(
+        &mut self,
+        user_id: i64,
+        customer: String,
+        work_item: String,
+        date: NaiveDate,
+    ) {
+        if customer.is_empty() || work_item.is_empty() {
+            return;
+        }
+
+        let user_entries = self.entries.entry(user_id).or_insert_with(Vec::new);
+
+        // Check if this entry already exists
+        let date_str = date.format("%Y-%m-%d").to_string();
+        if let Some(existing) = user_entries
+            .iter_mut()
+            .find(|e| e.customer == customer && e.work_item == work_item)
+        {
+            // Update the date if newer
+            if date_str > existing.last_used {
+                existing.last_used = date_str;
+            }
+        } else {
+            // Add new entry
+            user_entries.push(CachedEntry {
+                customer,
+                work_item,
+                last_used: date_str,
+            });
+        }
+
+        // Sort by most recent first
+        user_entries.sort_by(|a, b| b.last_used.cmp(&a.last_used));
+
+        self.last_updated = Local::now().to_rfc3339();
     }
 
     /// Check if cache is stale (older than specified hours)
@@ -158,10 +203,17 @@ impl EntryCache {
         }
     }
 
-    /// Clear all entries
+    /// Clear all entries for all users
     #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.entries.clear();
+        self.last_updated = Local::now().to_rfc3339();
+    }
+
+    /// Clear entries for a specific user
+    #[allow(dead_code)]
+    pub fn clear_user(&mut self, user_id: i64) {
+        self.entries.remove(&user_id);
         self.last_updated = Local::now().to_rfc3339();
     }
 }
@@ -175,6 +227,8 @@ impl Default for EntryCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const TEST_USER_ID: i64 = 12345;
 
     #[test]
     fn test_cache_new() {
@@ -195,12 +249,12 @@ mod tests {
             ("Customer A".to_string(), "WI-001".to_string(), date2), // Duplicate with newer date
         ];
 
-        cache.update_from_items(&items);
+        cache.update_from_items(TEST_USER_ID, &items);
 
-        assert_eq!(cache.entries.len(), 2);
+        let user_entries = cache.entries.get(&TEST_USER_ID).unwrap();
+        assert_eq!(user_entries.len(), 2);
         // Should keep the most recent date for Customer A + WI-001
-        let entry_a = cache
-            .entries
+        let entry_a = user_entries
             .iter()
             .find(|e| e.customer == "Customer A")
             .unwrap();
@@ -218,8 +272,8 @@ mod tests {
             ("Customer B".to_string(), "WI-002".to_string(), date2),
         ];
 
-        cache.update_from_items(&items);
-        let sorted = cache.get_sorted_entries();
+        cache.update_from_items(TEST_USER_ID, &items);
+        let sorted = cache.get_sorted_entries(TEST_USER_ID);
 
         // Most recent should be first
         assert_eq!(sorted[0].customer, "Customer B");
@@ -229,7 +283,7 @@ mod tests {
     #[test]
     fn test_get_unique_entries() {
         let mut cache = EntryCache::new();
-        cache.entries = vec![
+        let user_entries = vec![
             CachedEntry {
                 customer: "Customer A".to_string(),
                 work_item: "WI-001".to_string(),
@@ -246,8 +300,9 @@ mod tests {
                 last_used: "2025-01-18".to_string(),
             },
         ];
+        cache.entries.insert(TEST_USER_ID, user_entries);
 
-        let unique = cache.get_unique_entries();
+        let unique = cache.get_unique_entries(TEST_USER_ID);
         assert_eq!(unique.len(), 2);
     }
 
@@ -274,11 +329,10 @@ mod tests {
         let mut cache = EntryCache::new();
         let date = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
 
-        cache.update_from_items(&vec![(
-            "Customer A".to_string(),
-            "WI-001".to_string(),
-            date,
-        )]);
+        cache.update_from_items(
+            TEST_USER_ID,
+            &vec![("Customer A".to_string(), "WI-001".to_string(), date)],
+        );
 
         assert_eq!(cache.entries.len(), 1);
 
@@ -297,11 +351,68 @@ mod tests {
             ("Customer B".to_string(), "".to_string(), date), // Empty work item
         ];
 
-        cache.update_from_items(&items);
+        cache.update_from_items(TEST_USER_ID, &items);
 
         // Should only have the valid entry
-        assert_eq!(cache.entries.len(), 1);
-        assert_eq!(cache.entries[0].customer, "Customer A");
+        let user_entries = cache.entries.get(&TEST_USER_ID).unwrap();
+        assert_eq!(user_entries.len(), 1);
+        assert_eq!(user_entries[0].customer, "Customer A");
+    }
+
+    #[test]
+    fn test_add_entry() {
+        let mut cache = EntryCache::new();
+        let date = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
+
+        cache.add_entry(
+            TEST_USER_ID,
+            "Customer A".to_string(),
+            "WI-001".to_string(),
+            date,
+        );
+
+        let user_entries = cache.entries.get(&TEST_USER_ID).unwrap();
+        assert_eq!(user_entries.len(), 1);
+        assert_eq!(user_entries[0].customer, "Customer A");
+        assert_eq!(user_entries[0].work_item, "WI-001");
+    }
+
+    #[test]
+    fn test_add_entry_updates_existing() {
+        let mut cache = EntryCache::new();
+        let date1 = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
+        let date2 = NaiveDate::from_ymd_opt(2025, 1, 20).unwrap();
+
+        cache.add_entry(
+            TEST_USER_ID,
+            "Customer A".to_string(),
+            "WI-001".to_string(),
+            date1,
+        );
+        cache.add_entry(
+            TEST_USER_ID,
+            "Customer A".to_string(),
+            "WI-001".to_string(),
+            date2,
+        );
+
+        let user_entries = cache.entries.get(&TEST_USER_ID).unwrap();
+        assert_eq!(user_entries.len(), 1);
+        assert_eq!(user_entries[0].last_used, "2025-01-20");
+    }
+
+    #[test]
+    fn test_multiple_users() {
+        let mut cache = EntryCache::new();
+        let date = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
+
+        cache.add_entry(100, "Customer A".to_string(), "WI-001".to_string(), date);
+        cache.add_entry(200, "Customer B".to_string(), "WI-002".to_string(), date);
+
+        assert_eq!(cache.entries.len(), 2);
+        assert_eq!(cache.get_unique_entries(100).len(), 1);
+        assert_eq!(cache.get_unique_entries(200).len(), 1);
+        assert_eq!(cache.get_unique_entries(300).len(), 0);
     }
 }
 
