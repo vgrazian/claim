@@ -844,12 +844,45 @@ impl MondayClient {
             );
         }
 
-        // Build the date compare_value array
-        let date_values: Vec<String> = dates
-            .iter()
-            .flat_map(|date| vec!["EXACT".to_string(), date.clone()])
-            .collect();
-        let date_values_json = serde_json::to_string(&date_values)?;
+        // Monday API rejects items_page limits over 500.
+        let limit = limit.min(500);
+
+        // Build query rules dynamically.
+        // If no dates are provided, filter only by user (used by TUI cache refresh path).
+        let rules = if dates.is_empty() {
+            format!(
+                r#"
+                                    {{
+                                        column_id: "person"
+                                        compare_value: ["person-{}"]
+                                        operator: any_of
+                                    }}
+                "#,
+                user_id
+            )
+        } else {
+            let date_values: Vec<String> = dates
+                .iter()
+                .flat_map(|date| vec!["EXACT".to_string(), date.clone()])
+                .collect();
+            let date_values_json = serde_json::to_string(&date_values)?;
+
+            format!(
+                r#"
+                                    {{
+                                        column_id: "person"
+                                        compare_value: ["person-{}"]
+                                        operator: any_of
+                                    }},
+                                    {{
+                                        column_id: "date4"
+                                        compare_value: {}
+                                        operator: any_of
+                                    }}
+                "#,
+                user_id, date_values_json
+            )
+        };
 
         // Build the query with server-side filtering
         let query = format!(
@@ -861,16 +894,7 @@ impl MondayClient {
                             limit: {}
                             query_params: {{
                                 rules: [
-                                    {{
-                                        column_id: "person"
-                                        compare_value: ["person-{}"]
-                                        operator: any_of
-                                    }},
-                                    {{
-                                        column_id: "date4"
-                                        compare_value: {}
-                                        operator: any_of
-                                    }}
+{}
                                 ]
                                 operator: and
                             }}
@@ -890,7 +914,7 @@ impl MondayClient {
                 }}
             }}
             "#,
-            board_id, group_id, limit, user_id, date_values_json
+            board_id, group_id, limit, rules
         );
 
         if verbose {

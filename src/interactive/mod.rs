@@ -21,18 +21,59 @@ pub use events::EventHandler;
 
 use anyhow::Result;
 use crossterm::{
+    cursor::Show,
     event::{DisableMouseCapture, EnableMouseCapture},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
+use std::io::IsTerminal;
 
 use crate::config::Config;
 use crate::monday::MondayClient;
 
+/// Restores terminal mode even when startup fails before the UI loop begins.
+struct TerminalCleanup {
+    active: bool,
+}
+
+impl TerminalCleanup {
+    fn activate() -> Result<Self> {
+        enable_raw_mode()?;
+        execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
+        Ok(Self { active: true })
+    }
+
+    fn restore(&mut self) -> Result<()> {
+        if self.active {
+            disable_raw_mode()?;
+            execute!(
+                io::stdout(),
+                LeaveAlternateScreen,
+                DisableMouseCapture,
+                Show
+            )?;
+            self.active = false;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for TerminalCleanup {
+    fn drop(&mut self) {
+        let _ = self.restore();
+    }
+}
+
 /// Run the interactive UI application
 pub async fn run_interactive() -> Result<()> {
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        return Err(anyhow::anyhow!(
+            "Interactive mode requires a TTY. Run `claim` in a terminal session."
+        ));
+    }
+
     // Load configuration
     let config = Config::load()?;
     let client = MondayClient::new(config.api_key.clone());
@@ -40,25 +81,20 @@ pub async fn run_interactive() -> Result<()> {
     // Get current user
     let user = client.get_current_user_verbose(false).await?;
 
-    // Setup terminal
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend = CrosstermBackend::new(stdout);
+    // Setup terminal with guaranteed cleanup on all return paths
+    let mut terminal_cleanup = TerminalCleanup::activate()?;
+    let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
     // Create app and run
-    let mut app = App::new(client, user).await?;
-    let res = run_app(&mut terminal, &mut app).await;
+    let res = {
+        let mut app = App::new(client, user).await?;
+        run_app(&mut terminal, &mut app).await
+    };
 
-    // Restore terminal
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
+    // Explicit cleanup before function returns (Drop remains a fallback)
     terminal.show_cursor()?;
+    terminal_cleanup.restore()?;
 
     if let Err(err) = res {
         eprintln!("Error: {:?}", err);
