@@ -225,7 +225,7 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
         AppMode::EditEntry => "[Esc] Cancel edit",
         AppMode::DeleteEntry => "[y] Confirm  [n/Esc] Cancel",
         AppMode::Help => "Press any key to return",
-        AppMode::Report => "[↑↓] Select row  [Tab] Next week  [Shift+Tab] Prev week  [Esc/p/q] Return to normal view",
+        AppMode::Report => "[↑↓] Select row  [c] Copy row  [m] Mark/unmark  [C] Copy marked  [Tab] Next week  [Shift+Tab] Prev week  [Esc/p/q] Return to normal view",
     };
 
     let footer = Paragraph::new(shortcuts)
@@ -480,10 +480,25 @@ fn render_report(f: &mut Frame, app: &App, area: Rect) {
         } else {
             Style::default()
         };
+        // Indicate marked rows with a leading '*' if the work_item matches a marked item
+        let display_label = match app.get_report_row_work_item(current_row_index) {
+            Ok(item_key) => {
+                if app
+                    .marked_report_items
+                    .iter()
+                    .any(|m| item_key.len() > 0 && label.contains(m))
+                {
+                    format!("* {}", label)
+                } else {
+                    label.clone()
+                }
+            }
+            Err(_) => label.clone(),
+        };
 
         rows.push(
             Row::new(vec![
-                Cell::from(label),
+                Cell::from(display_label),
                 Cell::from(if hours[0] == 0.0 {
                     String::new()
                 } else {
@@ -556,10 +571,25 @@ fn render_report(f: &mut Frame, app: &App, area: Rect) {
             } else {
                 Style::default().fg(Color::Gray)
             };
+            // Indicate marked rows with a leading '*' if the work_item matches a marked item
+            let display_label = match app.get_report_row_work_item(current_row_index) {
+                Ok(item_key) => {
+                    if app
+                        .marked_report_items
+                        .iter()
+                        .any(|m| item_key.len() > 0 && label.contains(m))
+                    {
+                        format!("* {}", label)
+                    } else {
+                        label.clone()
+                    }
+                }
+                Err(_) => label.clone(),
+            };
 
             rows.push(
                 Row::new(vec![
-                    Cell::from(label),
+                    Cell::from(display_label),
                     Cell::from(if hours[0] == 0.0 {
                         String::new()
                     } else {

@@ -120,12 +120,20 @@ The interactive UI provides:
 - `Enter`: Save entry
 - `Esc`: Cancel
 
+Optional quick-select buffer
+
+- Set `CLAIM_QUICK_SELECT_BUFFER=1` to enable an opt-in quick-select buffer line at the top of the add/edit form. When enabled, press `Tab` (from the date field) to focus the quick buffer and use `0-9` or `Enter` to populate the customer/work-item from recent entries.
+
 **Report Mode:**
 
 - `Tab/Shift+Tab`: Navigate between weeks
 - `↑/↓`: Navigate between report rows
 - `Esc`: Return to normal mode
 - `q`: Quit application
+
+Copying report rows
+
+- In Report mode you can press `c` to copy the currently-selected report row to the system clipboard. The app will show a success or error message after attempting to copy.
 
 **Features:**
 

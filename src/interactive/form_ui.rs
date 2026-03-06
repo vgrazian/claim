@@ -15,6 +15,7 @@ use super::form::FormField;
 /// Render the form editor
 pub fn render_form(f: &mut Frame, app: &App, area: Rect) {
     if let Some(form) = &app.form_data {
+        // Optional quick-select buffer (opt-in via env CLAIM_QUICK_SELECT_BUFFER)
         let title = match app.mode {
             AppMode::AddEntry => " Add Entry ",
             AppMode::EditEntry => " Edit Entry ",
@@ -53,7 +54,13 @@ pub fn render_form(f: &mut Frame, app: &App, area: Rect) {
             };
 
             // Format the field display with cursor at the correct position
-            let display_value = if is_current {
+            let display_value = if field == FormField::QuickSelection {
+                if form.focus_on_quick_buffer {
+                    "<quick-select>".to_string()
+                } else {
+                    "Press 0-9 to pick from Recent Entries".to_string()
+                }
+            } else if is_current {
                 // Insert cursor at the cursor position
                 let cursor_pos = form.cursor_position.min(value.len());
                 if value.is_empty() {
@@ -82,6 +89,7 @@ pub fn render_form(f: &mut Frame, app: &App, area: Rect) {
         // Show validation hints for current field
         if !form.focus_on_cache {
             let hint = match form.current_field {
+                FormField::QuickSelection => "Quick entry: press 0-9 to select from Recent Entries",
                 FormField::Date => "Format: YYYY-MM-DD (e.g., 2024-01-15)",
                 FormField::ActivityType => "Press 0-9 to select from list →",
                 FormField::Customer => "Enter customer name or press 0-9 to select from cache →",

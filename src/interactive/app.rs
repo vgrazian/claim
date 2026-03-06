@@ -61,6 +61,240 @@ impl ClaimEntry {
     }
 }
 
+impl App {
+    /// Build textual lines for the report rows in the same order as UI rendering.
+    /// Returns the text for each data row (excluding header).
+    pub fn get_report_rows_text(&self) -> Result<Vec<String>, anyhow::Error> {
+        use std::collections::HashMap;
+
+        // Build report_data like in ui::render_report
+        let mut report_data: HashMap<(i32, String, String), [f64; 5]> = HashMap::new();
+
+        for entry in &self.claims {
+            let key = (
+                entry.activity_value,
+                entry.customer.clone(),
+                entry.work_item.clone(),
+            );
+            let day_index = entry.date.weekday().num_days_from_monday() as usize;
+            if day_index < 5 {
+                report_data.entry(key).or_insert([0.0; 5])[day_index] += entry.hours;
+            }
+        }
+
+        let mut billable_data: Vec<_> = report_data
+            .iter()
+            .filter(|((activity_value, _, _), _)| *activity_value == 1)
+            .map(|((_, customer, work_item), hours)| {
+                ((customer.clone(), work_item.clone()), *hours)
+            })
+            .collect();
+
+        let mut non_billable_data: Vec<_> = report_data
+            .iter()
+            .filter(|((activity_value, _, _), _)| *activity_value != 1)
+            .map(|((activity_value, customer, work_item), hours)| {
+                (
+                    (*activity_value, customer.clone(), work_item.clone()),
+                    *hours,
+                )
+            })
+            .collect();
+
+        // Sort billable by customer/work_item
+        billable_data.sort_by(|a, b| match a.0 .0.cmp(&b.0 .0) {
+            std::cmp::Ordering::Equal => a.0 .1.cmp(&b.0 .1),
+            other => other,
+        });
+
+        // Sort non-billable by activity type, then customer/work_item
+        non_billable_data.sort_by(|a, b| match a.0 .0.cmp(&b.0 .0) {
+            std::cmp::Ordering::Equal => match a.0 .1.cmp(&b.0 .1) {
+                std::cmp::Ordering::Equal => a.0 .2.cmp(&b.0 .2),
+                other => other,
+            },
+            other => other,
+        });
+
+        let mut rows_text = Vec::new();
+
+        // Helper to format a row into text
+        let format_row = |label: String, hours: [f64; 5]| -> String {
+            let mut parts = Vec::new();
+            parts.push(label);
+            for i in 0..5 {
+                if hours[i] == 0.0 {
+                    parts.push(String::new());
+                } else if hours[i] % 1.0 == 0.0 {
+                    parts.push(format!("{:.0}", hours[i]));
+                } else {
+                    parts.push(format!("{:.2}", hours[i]));
+                }
+            }
+            let total: f64 = hours.iter().sum();
+            if total % 1.0 == 0.0 {
+                parts.push(format!("{:.0}", total));
+            } else {
+                parts.push(format!("{:.2}", total));
+            }
+            parts.join("\t")
+        };
+
+        for ((customer, work_item), hours) in billable_data {
+            let label = if !work_item.is_empty() && !customer.is_empty() {
+                format!("{} - {}", work_item, customer)
+            } else if !work_item.is_empty() {
+                work_item
+            } else {
+                customer
+            };
+            rows_text.push(format_row(label, hours));
+        }
+
+        if !non_billable_data.is_empty() {
+            // Add a separator line to match UI
+            rows_text.push("---".to_string());
+        }
+
+        for ((activity_value, customer, work_item), hours) in non_billable_data {
+            // Convert activity_value to name if possible
+            let activity_name = crate::utils::map_activity_value_to_name(activity_value as u8);
+            let label = if !work_item.is_empty() && !customer.is_empty() {
+                format!("{} - {} ({})", work_item, customer, activity_name)
+            } else if !work_item.is_empty() {
+                format!("{} ({})", work_item, activity_name)
+            } else if !customer.is_empty() {
+                format!("{} ({})", customer, activity_name)
+            } else {
+                activity_name.to_string()
+            };
+            rows_text.push(format_row(label, hours));
+        }
+
+        // Add totals line
+        let mut day_totals = [0.0; 5];
+        for hours in report_data.values() {
+            for i in 0..5 {
+                day_totals[i] += hours[i];
+            }
+        }
+        let total_label = "Total".to_string();
+        rows_text.push(format_row(total_label, day_totals));
+
+        Ok(rows_text)
+    }
+
+    /// Get textual representation for a single report row index (0-based)
+    pub fn get_report_row_text(&self, idx: usize) -> Result<String, anyhow::Error> {
+        let rows = self.get_report_rows_text()?;
+        if idx < rows.len() {
+            Ok(rows[idx].clone())
+        } else {
+            Err(anyhow::anyhow!("Row index out of range"))
+        }
+    }
+
+    /// Get a sensible work-item/label for a report row index. This prefers the work_item
+    /// if present, otherwise falls back to customer or activity name. For totals/separators
+    /// the full row text is returned.
+    pub fn get_report_row_work_item(&self, idx: usize) -> Result<String, anyhow::Error> {
+        use std::collections::HashMap;
+
+        // Build the same structures as in get_report_rows_text
+        let mut report_data: HashMap<(i32, String, String), [f64; 5]> = HashMap::new();
+
+        for entry in &self.claims {
+            let key = (
+                entry.activity_value,
+                entry.customer.clone(),
+                entry.work_item.clone(),
+            );
+            let day_index = entry.date.weekday().num_days_from_monday() as usize;
+            if day_index < 5 {
+                report_data.entry(key).or_insert([0.0; 5])[day_index] += entry.hours;
+            }
+        }
+
+        let mut billable_data: Vec<_> = report_data
+            .iter()
+            .filter(|((activity_value, _, _), _)| *activity_value == 1)
+            .map(|((_, customer, work_item), hours)| {
+                ((customer.clone(), work_item.clone()), *hours)
+            })
+            .collect();
+
+        let mut non_billable_data: Vec<_> = report_data
+            .iter()
+            .filter(|((activity_value, _, _), _)| *activity_value != 1)
+            .map(|((activity_value, customer, work_item), hours)| {
+                (
+                    (*activity_value, customer.clone(), work_item.clone()),
+                    *hours,
+                )
+            })
+            .collect();
+
+        // Sort same as rows builder
+        billable_data.sort_by(|a, b| match a.0 .0.cmp(&b.0 .0) {
+            std::cmp::Ordering::Equal => a.0 .1.cmp(&b.0 .1),
+            other => other,
+        });
+
+        non_billable_data.sort_by(|a, b| match a.0 .0.cmp(&b.0 .0) {
+            std::cmp::Ordering::Equal => match a.0 .1.cmp(&b.0 .1) {
+                std::cmp::Ordering::Equal => a.0 .2.cmp(&b.0 .2),
+                other => other,
+            },
+            other => other,
+        });
+
+        // Build list of labels/work_items parallel to rows_text
+        let mut items: Vec<String> = Vec::new();
+
+        for ((customer, work_item), _hours) in billable_data {
+            // Prefer work_item if present, otherwise customer
+            if !work_item.is_empty() {
+                items.push(work_item);
+            } else if !customer.is_empty() {
+                items.push(customer);
+            } else {
+                items.push(String::new());
+            }
+        }
+
+        if !non_billable_data.is_empty() {
+            items.push("---".to_string());
+        }
+
+        for ((activity_value, customer, work_item), _hours) in non_billable_data {
+            if !work_item.is_empty() {
+                items.push(work_item);
+            } else if !customer.is_empty() {
+                items.push(customer);
+            } else {
+                let activity_name = crate::utils::map_activity_value_to_name(activity_value as u8);
+                items.push(activity_name.to_string());
+            }
+        }
+
+        // Totals label
+        let mut day_totals = [0.0; 5];
+        for hours in report_data.values() {
+            for i in 0..5 {
+                day_totals[i] += hours[i];
+            }
+        }
+        let _total_label = "Total".to_string();
+        items.push(_total_label);
+
+        if idx < items.len() {
+            Ok(items[idx].clone())
+        } else {
+            Err(anyhow::anyhow!("Row index out of range"))
+        }
+    }
+}
+
 /// Main application state
 pub struct App {
     /// Current week start date (always Monday)
@@ -98,6 +332,8 @@ pub struct App {
     pub week_start: NaiveDate,
     /// Selected row index in report mode (None means no selection)
     pub selected_report_row: Option<usize>,
+    /// Marked work items from the report (stored in memory until cleared)
+    pub marked_report_items: Vec<String>,
 }
 
 impl App {
@@ -135,6 +371,7 @@ impl App {
             editing_entry_id: None,
             week_start: current_week_start,
             selected_report_row: None,
+            marked_report_items: Vec::new(),
         };
 
         // Refresh cache on startup (like -r option)
@@ -341,6 +578,13 @@ impl App {
             KeyCode::Char('p') | KeyCode::Char('P') => {
                 self.mode = AppMode::Report;
                 self.selected_report_row = Some(0); // Start with first row selected
+                                                    // Inform user of report shortcuts (mark rows and copy marked items)
+                self.messages.clear();
+                self.messages.push(Message::new(
+                    MessageType::Info,
+                    "Report: press 'm' to mark/unmark rows, 'C' to copy marked work items"
+                        .to_string(),
+                ));
             }
             // Add entry
             KeyCode::Char('a') | KeyCode::Char('A') => {
@@ -393,6 +637,131 @@ impl App {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('p') | KeyCode::Char('P') => {
                 self.mode = AppMode::Normal;
                 self.selected_report_row = None; // Clear selection when exiting
+            }
+            // Copy selected report row or work-item label to clipboard (lowercase 'c')
+            KeyCode::Char('c') => {
+                if let Some(idx) = self.selected_report_row {
+                    // Prefer copying the work_item/label for the row if available
+                    match self.get_report_row_work_item(idx) {
+                        Ok(text) => match arboard::Clipboard::new() {
+                            Ok(mut cb) => {
+                                if let Err(e) = cb.set_text(text.clone()) {
+                                    self.messages.push(Message::new(
+                                        MessageType::Error,
+                                        format!("Failed to copy to clipboard: {}", e),
+                                    ));
+                                } else {
+                                    self.messages.push(Message::new(
+                                        MessageType::Success,
+                                        format!("Copied item to clipboard"),
+                                    ));
+                                }
+                            }
+                            Err(e) => {
+                                self.messages.push(Message::new(
+                                    MessageType::Error,
+                                    format!("Clipboard unavailable: {}", e),
+                                ));
+                            }
+                        },
+                        Err(_) => {
+                            // Fallback to copying full row text
+                            match self.get_report_row_text(idx) {
+                                Ok(text) => match arboard::Clipboard::new() {
+                                    Ok(mut cb) => {
+                                        if let Err(e) = cb.set_text(text.clone()) {
+                                            self.messages.push(Message::new(
+                                                MessageType::Error,
+                                                format!("Failed to copy to clipboard: {}", e),
+                                            ));
+                                        } else {
+                                            self.messages.push(Message::new(
+                                                MessageType::Success,
+                                                format!("Copied row {} to clipboard", idx + 1),
+                                            ));
+                                        }
+                                    }
+                                    Err(e) => {
+                                        self.messages.push(Message::new(
+                                            MessageType::Error,
+                                            format!("Clipboard unavailable: {}", e),
+                                        ));
+                                    }
+                                },
+                                Err(e) => {
+                                    self.messages.push(Message::new(
+                                        MessageType::Error,
+                                        format!("Could not build report text: {}", e),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // Mark/unmark selected row
+            KeyCode::Char('m') | KeyCode::Char('M') => {
+                if let Some(idx) = self.selected_report_row {
+                    match self.get_report_row_work_item(idx) {
+                        Ok(item) => {
+                            if self.marked_report_items.contains(&item) {
+                                self.marked_report_items.retain(|i| i != &item);
+                                self.messages.push(Message::new(
+                                    MessageType::Info,
+                                    format!("Unmarked '{}'", item),
+                                ));
+                            } else {
+                                self.marked_report_items.push(item.clone());
+                                self.messages.push(Message::new(
+                                    MessageType::Success,
+                                    format!("Marked '{}'", item),
+                                ));
+                            }
+                        }
+                        Err(_) => {
+                            self.messages.push(Message::new(
+                                MessageType::Error,
+                                "Could not determine row item to mark".to_string(),
+                            ));
+                        }
+                    }
+                }
+            }
+            // Copy all marked work items to clipboard
+            KeyCode::Char('C') => {
+                if self.marked_report_items.is_empty() {
+                    self.messages.push(Message::new(
+                        MessageType::Info,
+                        "No marked items to copy".to_string(),
+                    ));
+                } else {
+                    let joined = self.marked_report_items.join("\n");
+                    match arboard::Clipboard::new() {
+                        Ok(mut cb) => match cb.set_text(joined.clone()) {
+                            Ok(_) => {
+                                self.messages.push(Message::new(
+                                    MessageType::Success,
+                                    format!(
+                                        "Copied {} marked items",
+                                        self.marked_report_items.len()
+                                    ),
+                                ));
+                            }
+                            Err(e) => {
+                                self.messages.push(Message::new(
+                                    MessageType::Error,
+                                    format!("Failed to copy to clipboard: {}", e),
+                                ));
+                            }
+                        },
+                        Err(e) => {
+                            self.messages.push(Message::new(
+                                MessageType::Error,
+                                format!("Clipboard unavailable: {}", e),
+                            ));
+                        }
+                    }
+                }
             }
             // Tab: Navigate weeks forward
             KeyCode::Tab => {
@@ -463,39 +832,111 @@ impl App {
                         .push(Message::new(MessageType::Info, "Add cancelled".to_string()));
                 }
                 KeyCode::Tab => {
+                    // Fields allowed to open recent entries/cache
+                    let allowed_for_cache = matches!(
+                        form.current_field,
+                        super::form::FormField::QuickSelection
+                            | super::form::FormField::Date
+                            | super::form::FormField::ActivityType
+                            | super::form::FormField::Customer
+                            | super::form::FormField::WorkItem
+                    );
+
                     if event
                         .modifiers
                         .contains(crossterm::event::KeyModifiers::SHIFT)
                     {
-                        form.previous_field();
-                    } else if form.focus_on_cache {
-                        form.focus_on_cache = false;
+                        // Shift+Tab: if a panel is focused, return to form; otherwise go to previous field
+                        if form.focus_on_cache
+                            || form.focus_on_quick_buffer
+                            || form.focus_on_activity
+                        {
+                            form.focus_on_cache = false;
+                            form.focus_on_quick_buffer = false;
+                            form.focus_on_activity = false;
+                        } else {
+                            form.previous_field();
+                            form.update_cursor_for_field();
+                        }
                     } else {
-                        form.toggle_focus();
+                        // Tab: if panel focused, return to form
+                        if form.focus_on_cache
+                            || form.focus_on_quick_buffer
+                            || form.focus_on_activity
+                        {
+                            form.focus_on_cache = false;
+                            form.focus_on_quick_buffer = false;
+                            form.focus_on_activity = false;
+                        } else if form.current_field == super::form::FormField::ActivityType {
+                            form.toggle_activity_focus();
+                        } else if form.current_field == super::form::FormField::QuickSelection
+                            || form.current_field == super::form::FormField::Date
+                        {
+                            // Toggle quick buffer when tabbing from Quick selection or Date
+                            form.toggle_quick_buffer();
+                        } else if allowed_for_cache {
+                            // Toggle cache only from allowed fields
+                            form.toggle_focus();
+                        } else {
+                            form.next_field();
+                            form.update_cursor_for_field();
+                        }
+                    }
+                }
+                KeyCode::BackTab => {
+                    // Handle Shift+Tab from terminals that send BackTab
+                    if form.focus_on_cache || form.focus_on_quick_buffer || form.focus_on_activity {
+                        form.focus_on_cache = false;
+                        form.focus_on_quick_buffer = false;
+                        form.focus_on_activity = false;
+                    } else {
+                        form.previous_field();
+                        form.update_cursor_for_field();
                     }
                 }
                 KeyCode::Left => {
-                    if !form.focus_on_cache {
+                    if !form.focus_on_cache
+                        && !form.focus_on_quick_buffer
+                        && !form.focus_on_activity
+                    {
                         form.move_cursor_left();
                     }
                 }
                 KeyCode::Right => {
-                    if !form.focus_on_cache {
+                    if !form.focus_on_cache
+                        && !form.focus_on_quick_buffer
+                        && !form.focus_on_activity
+                    {
                         form.move_cursor_right();
                     }
                 }
                 KeyCode::Home => {
-                    if !form.focus_on_cache {
+                    if !form.focus_on_cache
+                        && !form.focus_on_quick_buffer
+                        && !form.focus_on_activity
+                    {
                         form.move_cursor_to_start();
                     }
                 }
                 KeyCode::End => {
-                    if !form.focus_on_cache {
+                    if !form.focus_on_cache
+                        && !form.focus_on_quick_buffer
+                        && !form.focus_on_activity
+                    {
                         form.move_cursor_to_end();
                     }
                 }
                 KeyCode::Up => {
-                    if form.focus_on_cache {
+                    if form.focus_on_activity {
+                        let types = super::activity_types::get_all_activity_types();
+                        if form.selected_activity_index > 0 {
+                            form.selected_activity_index -= 1;
+                        }
+                        let idx = form
+                            .selected_activity_index
+                            .min(types.len().saturating_sub(1));
+                        form.activity_type = types[idx].name.to_string();
+                    } else if form.focus_on_quick_buffer || form.focus_on_cache {
                         if form.selected_cache_index > 0 {
                             form.selected_cache_index -= 1;
                         }
@@ -505,7 +946,20 @@ impl App {
                     }
                 }
                 KeyCode::Down => {
-                    if form.focus_on_cache {
+                    if form.focus_on_activity {
+                        let types = super::activity_types::get_all_activity_types();
+                        let max = types.len().saturating_sub(1);
+                        if form.selected_activity_index < max {
+                            form.selected_activity_index += 1;
+                        }
+                        let idx = form.selected_activity_index.min(max);
+                        form.activity_type = types[idx].name.to_string();
+                    } else if form.focus_on_quick_buffer {
+                        // When quick-selection is focused, Down should move into the Date field
+                        form.focus_on_quick_buffer = false;
+                        form.current_field = super::form::FormField::Date;
+                        form.update_cursor_for_field();
+                    } else if form.focus_on_cache {
                         let cache_size = self.cache.get_unique_entries(self.user.id).len();
                         if form.selected_cache_index < cache_size.saturating_sub(1) {
                             form.selected_cache_index += 1;
@@ -516,7 +970,22 @@ impl App {
                     }
                 }
                 KeyCode::Enter => {
-                    if form.focus_on_cache {
+                    if form.focus_on_activity {
+                        let types = super::activity_types::get_all_activity_types();
+                        if let Some(t) = types.get(form.selected_activity_index) {
+                            form.activity_type = t.name.to_string();
+                            form.focus_on_activity = false;
+                            // Move to next logical field (Customer)
+                            form.current_field = super::form::FormField::Customer;
+                            form.update_cursor_for_field();
+                        }
+                    } else if form.focus_on_quick_buffer {
+                        // Apply selected cache entry from quick buffer using selected_cache_index
+                        let entries = self.cache.get_unique_entries(self.user.id);
+                        if let Some(entry) = entries.get(form.selected_cache_index) {
+                            form.apply_cache_entry(entry.customer.clone(), entry.work_item.clone());
+                        }
+                    } else if form.focus_on_cache {
                         // Apply selected cache entry
                         let entries = self.cache.get_unique_entries(self.user.id);
                         if let Some(entry) = entries.get(form.selected_cache_index) {
@@ -563,52 +1032,76 @@ impl App {
                     }
                 }
                 KeyCode::Char(c) => {
-                    // Handle number keys for selection
                     if c.is_ascii_digit() {
                         let digit = c.to_digit(10).unwrap() as usize;
 
-                        // Check current field context
-                        match form.current_field {
-                            super::form::FormField::ActivityType => {
-                                // Select activity type by number
-                                if let Some(activity_name) =
-                                    super::activity_types::get_activity_type_by_number(digit as u8)
-                                {
-                                    form.activity_type = activity_name.to_string();
-                                }
+                        if form.focus_on_activity {
+                            // Activity selection panel active: choose activity by number
+                            form.set_activity_by_number(digit as u8);
+                        } else if form.focus_on_quick_buffer {
+                            // Quick buffer: choose cached entry by number
+                            let entries = self.cache.get_unique_entries(self.user.id);
+                            if digit < entries.len() && digit < 10 {
+                                let entry = &entries[digit];
+                                form.apply_cache_entry(
+                                    entry.customer.clone(),
+                                    entry.work_item.clone(),
+                                );
                             }
-                            super::form::FormField::Customer | super::form::FormField::WorkItem => {
-                                // Select from cache by number
-                                let entries = self.cache.get_unique_entries(self.user.id);
-                                if digit < entries.len() && digit < 10 {
-                                    let entry = &entries[digit];
-                                    form.apply_cache_entry(
-                                        entry.customer.clone(),
-                                        entry.work_item.clone(),
-                                    );
-                                }
+                        } else if form.current_field == super::form::FormField::QuickSelection {
+                            // Quick selection field: choose cached entry by number
+                            let entries = self.cache.get_unique_entries(self.user.id);
+                            if digit < entries.len() && digit < 10 {
+                                let entry = &entries[digit];
+                                form.apply_cache_entry(
+                                    entry.customer.clone(),
+                                    entry.work_item.clone(),
+                                );
                             }
-                            _ => {
-                                // For other fields, just add the character
-                                if !form.focus_on_cache {
-                                    form.insert_char(c);
-                                }
+                        } else if form.focus_on_cache {
+                            // Cache panel active: choose cached entry by number
+                            let entries = self.cache.get_unique_entries(self.user.id);
+                            if digit < entries.len() && digit < 10 {
+                                let entry = &entries[digit];
+                                form.apply_cache_entry(
+                                    entry.customer.clone(),
+                                    entry.work_item.clone(),
+                                );
+                            }
+                        } else {
+                            // Panels not focused: treat as normal input
+                            if !form.focus_on_cache
+                                && !form.focus_on_quick_buffer
+                                && !form.focus_on_activity
+                                && form.current_field != super::form::FormField::QuickSelection
+                            {
+                                form.insert_char(c);
                             }
                         }
                     } else {
-                        // Non-digit character - add to current field
-                        if !form.focus_on_cache {
+                        // Non-digit character - add to current field when panels not focused
+                        if !form.focus_on_cache
+                            && !form.focus_on_quick_buffer
+                            && !form.focus_on_activity
+                            && form.current_field != super::form::FormField::QuickSelection
+                        {
                             form.insert_char(c);
                         }
                     }
                 }
                 KeyCode::Backspace => {
-                    if !form.focus_on_cache {
+                    if !form.focus_on_cache
+                        && !form.focus_on_quick_buffer
+                        && !form.focus_on_activity
+                    {
                         form.delete_char_before();
                     }
                 }
                 KeyCode::Delete => {
-                    if !form.focus_on_cache {
+                    if !form.focus_on_cache
+                        && !form.focus_on_quick_buffer
+                        && !form.focus_on_activity
+                    {
                         form.delete_char_at();
                     }
                 }
@@ -633,39 +1126,107 @@ impl App {
                     ));
                 }
                 KeyCode::Tab => {
+                    // Fields allowed to open recent entries/cache
+                    let allowed_for_cache = matches!(
+                        form.current_field,
+                        super::form::FormField::QuickSelection
+                            | super::form::FormField::Date
+                            | super::form::FormField::ActivityType
+                            | super::form::FormField::Customer
+                            | super::form::FormField::WorkItem
+                    );
+
                     if event
                         .modifiers
                         .contains(crossterm::event::KeyModifiers::SHIFT)
                     {
-                        form.previous_field();
-                    } else if form.focus_on_cache {
-                        form.focus_on_cache = false;
+                        if form.focus_on_cache
+                            || form.focus_on_quick_buffer
+                            || form.focus_on_activity
+                        {
+                            form.focus_on_cache = false;
+                            form.focus_on_quick_buffer = false;
+                            form.focus_on_activity = false;
+                        } else {
+                            form.previous_field();
+                            form.update_cursor_for_field();
+                        }
                     } else {
-                        form.toggle_focus();
+                        if form.focus_on_cache
+                            || form.focus_on_quick_buffer
+                            || form.focus_on_activity
+                        {
+                            form.focus_on_cache = false;
+                            form.focus_on_quick_buffer = false;
+                            form.focus_on_activity = false;
+                        } else if form.current_field == super::form::FormField::ActivityType {
+                            form.toggle_activity_focus();
+                        } else if form.current_field == super::form::FormField::QuickSelection
+                            || form.current_field == super::form::FormField::Date
+                        {
+                            form.toggle_quick_buffer();
+                        } else if allowed_for_cache {
+                            form.toggle_focus();
+                        } else {
+                            form.next_field();
+                            form.update_cursor_for_field();
+                        }
+                    }
+                }
+                KeyCode::BackTab => {
+                    // Handle Shift+Tab from terminals that send BackTab
+                    if form.focus_on_cache || form.focus_on_quick_buffer || form.focus_on_activity {
+                        form.focus_on_cache = false;
+                        form.focus_on_quick_buffer = false;
+                        form.focus_on_activity = false;
+                    } else {
+                        form.previous_field();
+                        form.update_cursor_for_field();
                     }
                 }
                 KeyCode::Left => {
-                    if !form.focus_on_cache {
+                    if !form.focus_on_cache
+                        && !form.focus_on_quick_buffer
+                        && !form.focus_on_activity
+                    {
                         form.move_cursor_left();
                     }
                 }
                 KeyCode::Right => {
-                    if !form.focus_on_cache {
+                    if !form.focus_on_cache
+                        && !form.focus_on_quick_buffer
+                        && !form.focus_on_activity
+                    {
                         form.move_cursor_right();
                     }
                 }
                 KeyCode::Home => {
-                    if !form.focus_on_cache {
+                    if !form.focus_on_cache
+                        && !form.focus_on_quick_buffer
+                        && !form.focus_on_activity
+                    {
                         form.move_cursor_to_start();
                     }
                 }
                 KeyCode::End => {
-                    if !form.focus_on_cache {
+                    if !form.focus_on_cache
+                        && !form.focus_on_quick_buffer
+                        && !form.focus_on_activity
+                    {
                         form.move_cursor_to_end();
                     }
                 }
                 KeyCode::Up => {
-                    if form.focus_on_cache {
+                    if form.focus_on_activity {
+                        let types = super::activity_types::get_all_activity_types();
+                        if form.selected_activity_index > 0 {
+                            form.selected_activity_index -= 1;
+                        }
+                        let idx = form
+                            .selected_activity_index
+                            .min(types.len().saturating_sub(1));
+                        form.activity_type = types[idx].name.to_string();
+                    } else if form.focus_on_quick_buffer || form.focus_on_cache {
                         if form.selected_cache_index > 0 {
                             form.selected_cache_index -= 1;
                         }
@@ -675,7 +1236,15 @@ impl App {
                     }
                 }
                 KeyCode::Down => {
-                    if form.focus_on_cache {
+                    if form.focus_on_activity {
+                        let types = super::activity_types::get_all_activity_types();
+                        let max = types.len().saturating_sub(1);
+                        if form.selected_activity_index < max {
+                            form.selected_activity_index += 1;
+                        }
+                        let idx = form.selected_activity_index.min(max);
+                        form.activity_type = types[idx].name.to_string();
+                    } else if form.focus_on_quick_buffer || form.focus_on_cache {
                         let cache_size = self.cache.get_unique_entries(self.user.id).len();
                         if form.selected_cache_index < cache_size.saturating_sub(1) {
                             form.selected_cache_index += 1;
@@ -686,7 +1255,22 @@ impl App {
                     }
                 }
                 KeyCode::Enter => {
-                    if form.focus_on_cache {
+                    if form.focus_on_activity {
+                        let types = super::activity_types::get_all_activity_types();
+                        if let Some(t) = types.get(form.selected_activity_index) {
+                            form.activity_type = t.name.to_string();
+                            form.focus_on_activity = false;
+                            // Move to next logical field (Customer)
+                            form.current_field = super::form::FormField::Customer;
+                            form.update_cursor_for_field();
+                        }
+                    } else if form.focus_on_quick_buffer {
+                        // Apply selected cache entry from quick buffer using selected_cache_index
+                        let entries = self.cache.get_unique_entries(self.user.id);
+                        if let Some(entry) = entries.get(form.selected_cache_index) {
+                            form.apply_cache_entry(entry.customer.clone(), entry.work_item.clone());
+                        }
+                    } else if form.focus_on_cache {
                         // Apply selected cache entry
                         let entries = self.cache.get_unique_entries(self.user.id);
                         if let Some(entry) = entries.get(form.selected_cache_index) {
@@ -735,52 +1319,76 @@ impl App {
                     }
                 }
                 KeyCode::Char(c) => {
-                    // Handle number keys for selection
                     if c.is_ascii_digit() {
                         let digit = c.to_digit(10).unwrap() as usize;
 
-                        // Check current field context
-                        match form.current_field {
-                            super::form::FormField::ActivityType => {
-                                // Select activity type by number
-                                if let Some(activity_name) =
-                                    super::activity_types::get_activity_type_by_number(digit as u8)
-                                {
-                                    form.activity_type = activity_name.to_string();
-                                }
+                        if form.focus_on_activity {
+                            // Activity selection panel active: choose activity by number
+                            form.set_activity_by_number(digit as u8);
+                        } else if form.focus_on_quick_buffer {
+                            // Quick buffer: choose cached entry by number
+                            let entries = self.cache.get_unique_entries(self.user.id);
+                            if digit < entries.len() && digit < 10 {
+                                let entry = &entries[digit];
+                                form.apply_cache_entry(
+                                    entry.customer.clone(),
+                                    entry.work_item.clone(),
+                                );
                             }
-                            super::form::FormField::Customer | super::form::FormField::WorkItem => {
-                                // Select from cache by number
-                                let entries = self.cache.get_unique_entries(self.user.id);
-                                if digit < entries.len() && digit < 10 {
-                                    let entry = &entries[digit];
-                                    form.apply_cache_entry(
-                                        entry.customer.clone(),
-                                        entry.work_item.clone(),
-                                    );
-                                }
+                        } else if form.current_field == super::form::FormField::QuickSelection {
+                            // Quick selection field: choose cached entry by number
+                            let entries = self.cache.get_unique_entries(self.user.id);
+                            if digit < entries.len() && digit < 10 {
+                                let entry = &entries[digit];
+                                form.apply_cache_entry(
+                                    entry.customer.clone(),
+                                    entry.work_item.clone(),
+                                );
                             }
-                            _ => {
-                                // For other fields, just add the character
-                                if !form.focus_on_cache {
-                                    form.insert_char(c);
-                                }
+                        } else if form.focus_on_cache {
+                            // Cache panel active: choose cached entry by number
+                            let entries = self.cache.get_unique_entries(self.user.id);
+                            if digit < entries.len() && digit < 10 {
+                                let entry = &entries[digit];
+                                form.apply_cache_entry(
+                                    entry.customer.clone(),
+                                    entry.work_item.clone(),
+                                );
+                            }
+                        } else {
+                            // Panels not focused: treat as normal input
+                            if !form.focus_on_cache
+                                && !form.focus_on_quick_buffer
+                                && !form.focus_on_activity
+                                && form.current_field != super::form::FormField::QuickSelection
+                            {
+                                form.insert_char(c);
                             }
                         }
                     } else {
-                        // Non-digit character - add to current field
-                        if !form.focus_on_cache {
+                        // Non-digit character - add to current field when panels not focused
+                        if !form.focus_on_cache
+                            && !form.focus_on_quick_buffer
+                            && !form.focus_on_activity
+                            && form.current_field != super::form::FormField::QuickSelection
+                        {
                             form.insert_char(c);
                         }
                     }
                 }
                 KeyCode::Backspace => {
-                    if !form.focus_on_cache {
+                    if !form.focus_on_cache
+                        && !form.focus_on_quick_buffer
+                        && !form.focus_on_activity
+                    {
                         form.delete_char_before();
                     }
                 }
                 KeyCode::Delete => {
-                    if !form.focus_on_cache {
+                    if !form.focus_on_cache
+                        && !form.focus_on_quick_buffer
+                        && !form.focus_on_activity
+                    {
                         form.delete_char_at();
                     }
                 }

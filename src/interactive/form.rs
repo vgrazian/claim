@@ -5,6 +5,7 @@ use chrono::NaiveDate;
 /// Form field types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormField {
+    QuickSelection,
     Date,
     ActivityType,
     Customer,
@@ -17,6 +18,7 @@ impl FormField {
     /// Get all fields in order
     pub fn all() -> Vec<FormField> {
         vec![
+            FormField::QuickSelection,
             FormField::Date,
             FormField::ActivityType,
             FormField::Customer,
@@ -29,19 +31,21 @@ impl FormField {
     /// Get the next field
     pub fn next(&self) -> FormField {
         match self {
+            FormField::QuickSelection => FormField::Date,
             FormField::Date => FormField::ActivityType,
             FormField::ActivityType => FormField::Customer,
             FormField::Customer => FormField::WorkItem,
             FormField::WorkItem => FormField::Hours,
             FormField::Hours => FormField::Comment,
-            FormField::Comment => FormField::Date,
+            FormField::Comment => FormField::QuickSelection,
         }
     }
 
     /// Get the previous field
     pub fn previous(&self) -> FormField {
         match self {
-            FormField::Date => FormField::Comment,
+            FormField::QuickSelection => FormField::Comment,
+            FormField::Date => FormField::QuickSelection,
             FormField::ActivityType => FormField::Date,
             FormField::Customer => FormField::ActivityType,
             FormField::WorkItem => FormField::Customer,
@@ -53,6 +57,7 @@ impl FormField {
     /// Get field label
     pub fn label(&self) -> &'static str {
         match self {
+            FormField::QuickSelection => "Quick selection",
             FormField::Date => "Date",
             FormField::ActivityType => "Activity Type",
             FormField::Customer => "Customer",
@@ -74,7 +79,10 @@ pub struct FormData {
     pub comment: String,
     pub current_field: FormField,
     pub focus_on_cache: bool,
+    pub focus_on_quick_buffer: bool,
+    pub focus_on_activity: bool,
     pub selected_cache_index: usize,
+    pub selected_activity_index: usize,
     pub cursor_position: usize,
 }
 
@@ -88,9 +96,12 @@ impl FormData {
             work_item: String::new(),
             hours: "8".to_string(),
             comment: String::new(),
-            current_field: FormField::Date,
+            current_field: FormField::QuickSelection,
             focus_on_cache: false,
+            focus_on_quick_buffer: false,
+            focus_on_activity: false,
             selected_cache_index: 0,
+            selected_activity_index: 1,
             cursor_position: 0,
         }
     }
@@ -114,14 +125,43 @@ impl FormData {
             comment: comment.unwrap_or_default(),
             current_field: FormField::Date,
             focus_on_cache: false,
+            focus_on_quick_buffer: false,
+            focus_on_activity: false,
             selected_cache_index: 0,
+            selected_activity_index: 1,
             cursor_position: date_str.len(), // Start at end of date field
+        }
+    }
+
+    /// Toggle focus to activity selection panel
+    pub fn toggle_activity_focus(&mut self) {
+        self.focus_on_activity = !self.focus_on_activity;
+        if self.focus_on_activity {
+            self.focus_on_cache = false;
+        }
+    }
+
+    /// Toggle quick buffer focus
+    pub fn toggle_quick_buffer(&mut self) {
+        self.focus_on_quick_buffer = !self.focus_on_quick_buffer;
+        if self.focus_on_quick_buffer {
+            self.focus_on_cache = false;
+            self.focus_on_activity = false;
+        }
+    }
+
+    /// Set activity by numeric id and update selected index
+    pub fn set_activity_by_number(&mut self, number: u8) {
+        if let Some(name) = super::activity_types::get_activity_type_by_number(number) {
+            self.activity_type = name.to_string();
+            self.selected_activity_index = number as usize;
         }
     }
 
     /// Get the current field value
     pub fn get_field_value(&self, field: FormField) -> &str {
         match field {
+            FormField::QuickSelection => "",
             FormField::Date => &self.date,
             FormField::ActivityType => &self.activity_type,
             FormField::Customer => &self.customer,
@@ -134,6 +174,7 @@ impl FormData {
     /// Get mutable reference to current field value
     pub fn get_current_field_mut(&mut self) -> &mut String {
         match self.current_field {
+            FormField::QuickSelection => &mut self.date,
             FormField::Date => &mut self.date,
             FormField::ActivityType => &mut self.activity_type,
             FormField::Customer => &mut self.customer,
