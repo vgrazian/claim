@@ -2,9 +2,6 @@ use anyhow::{anyhow, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
-use std::time::{Duration, Instant};
 
 #[derive(Debug, Serialize)]
 struct MondayRequest {
@@ -14,6 +11,12 @@ struct MondayRequest {
 #[derive(Debug, Deserialize)]
 struct MondayResponse {
     data: Option<MondayData>,
+    #[serde(default)]
+    errors: Vec<MondayError>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MondayErrorsOnlyResponse {
     #[serde(default)]
     errors: Vec<MondayError>,
 }
@@ -84,86 +87,9 @@ struct MondayError {
     error_code: String,
 }
 
-/// Cache key for in-memory query cache
-#[derive(Hash, Eq, PartialEq, Clone, Debug)]
-pub struct QueryCacheKey {
-    pub board_id: String,
-    pub group_id: String,
-    pub user_id: i64,
-    pub limit: usize,
-}
-
-/// Cached query data with timestamp
-#[derive(Clone, Debug)]
-struct CachedQueryData {
-    board: Board,
-    items: Vec<Item>,
-    cached_at: Instant,
-}
-
-/// In-memory cache for query results
-pub struct QueryCache {
-    data: Arc<RwLock<HashMap<QueryCacheKey, CachedQueryData>>>,
-    ttl: Duration,
-}
-
-impl QueryCache {
-    pub fn new(ttl_seconds: u64) -> Self {
-        QueryCache {
-            data: Arc::new(RwLock::new(HashMap::new())),
-            ttl: Duration::from_secs(ttl_seconds),
-        }
-    }
-
-    pub fn get(&self, key: &QueryCacheKey) -> Option<(Board, Vec<Item>)> {
-        let cache = self.data.read().ok()?;
-        let cached = cache.get(key)?;
-
-        // Check if expired
-        if cached.cached_at.elapsed() > self.ttl {
-            return None;
-        }
-
-        Some((cached.board.clone(), cached.items.clone()))
-    }
-
-    pub fn set(&self, key: QueryCacheKey, board: Board, items: Vec<Item>) {
-        if let Ok(mut cache) = self.data.write() {
-            cache.insert(
-                key,
-                CachedQueryData {
-                    board,
-                    items,
-                    cached_at: Instant::now(),
-                },
-            );
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn invalidate(&self, user_id: i64) {
-        if let Ok(mut cache) = self.data.write() {
-            cache.retain(|k, _| k.user_id != user_id);
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn clear(&self) {
-        if let Ok(mut cache) = self.data.write() {
-            cache.clear();
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn size(&self) -> usize {
-        self.data.read().map(|c| c.len()).unwrap_or(0)
-    }
-}
-
 pub struct MondayClient {
     client: Client,
     api_key: String,
-    query_cache: QueryCache,
 }
 
 // Custom deserializer to handle both string and integer IDs
@@ -313,11 +239,7 @@ impl MondayClient {
             .build()
             .expect("Failed to build HTTP client with optimized settings");
 
-        MondayClient {
-            client,
-            api_key,
-            query_cache: QueryCache::new(300), // 5 minute TTL for in-memory cache
-        }
+        MondayClient { client, api_key }
     }
 
     pub async fn get_current_user_verbose(&self, verbose: bool) -> Result<MondayUser> {
@@ -633,125 +555,6 @@ impl MondayClient {
             .ok_or_else(|| anyhow!("No board found with ID {}", board_id))?;
 
         Ok(board)
-    }
-
-    /// Optimized method: Get board structure + items in a single query with caching
-    /// This reduces API calls from 2 to 1 compared to separate get_board_with_groups + query_items calls
-    /// Includes in-memory cache for repeated queries
-    /// Returns (Board, Vec<Item>, cache_hit: bool)
-    pub async fn query_board_with_items_optimized(
-        &self,
-        board_id: &str,
-        group_id: &str,
-        user_id: i64,
-        limit: usize,
-        verbose: bool,
-    ) -> Result<(Board, Vec<Item>, bool)> {
-        // Check cache first
-        let cache_key = QueryCacheKey {
-            board_id: board_id.to_string(),
-            group_id: group_id.to_string(),
-            user_id,
-            limit,
-        };
-
-        if let Some((board, items)) = self.query_cache.get(&cache_key) {
-            if verbose {
-                println!("✓ Cache HIT - using cached data ({} items)", items.len());
-            }
-            return Ok((board, items, true)); // cache hit
-        }
-
-        if verbose {
-            println!("✗ Cache MISS - fetching from API");
-        }
-        let query = format!(
-            r#"
-            {{
-                boards(ids: ["{}"]) {{
-                    id
-                    name
-                    groups(ids: ["{}"]) {{
-                        id
-                        title
-                        items_page(limit: {}) {{
-                            cursor
-                            items {{
-                                id
-                                name
-                                column_values {{
-                                    id
-                                    value
-                                    text
-                                }}
-                            }}
-                        }}
-                    }}
-                }}
-            }}
-            "#,
-            board_id, group_id, limit
-        );
-
-        if verbose {
-            println!("Sending combined board+items query (optimized)");
-            println!("Query:\n{}", query);
-        }
-
-        let request_body = MondayRequest { query };
-        let response = self.send_request(request_body, verbose).await?;
-
-        if verbose {
-            println!(
-                "Combined response: {}",
-                &response[..500.min(response.len())]
-            );
-        }
-
-        // Parse response
-        let monday_response: MondayResponse = serde_json::from_str(&response)
-            .map_err(|e| anyhow!("Failed to parse combined response: {}", e))?;
-
-        // Check for API errors
-        if !monday_response.errors.is_empty() {
-            let error_messages: Vec<String> = monday_response
-                .errors
-                .iter()
-                .map(|e| format!("{} (code: {})", e.message, e.error_code))
-                .collect();
-            return Err(anyhow!(
-                "Monday.com API errors: {}",
-                error_messages.join(", ")
-            ));
-        }
-
-        let board = monday_response
-            .data
-            .and_then(|data| data.boards)
-            .and_then(|mut boards| boards.pop())
-            .ok_or_else(|| anyhow!("No board found with ID {}", board_id))?;
-
-        // Extract items from the board
-        let items = board
-            .groups
-            .as_ref()
-            .and_then(|groups| groups.first())
-            .and_then(|group| group.items_page.as_ref())
-            .map(|page| page.items.clone())
-            .unwrap_or_default();
-
-        if verbose {
-            println!(
-                "✓ Fetched board structure + {} items in single API call",
-                items.len()
-            );
-        }
-
-        // Store in cache for future requests
-        self.query_cache
-            .set(cache_key, board.clone(), items.clone());
-
-        Ok((board, items, false)) // cache miss
     }
 
     pub async fn create_item_verbose(
@@ -1099,6 +902,29 @@ impl MondayClient {
 
         if verbose {
             println!("Response: {}", &response[..500.min(response.len())]);
+        }
+
+        // Surface API-side request/validation failures explicitly.
+        let error_response: MondayErrorsOnlyResponse = serde_json::from_str(&response)
+            .map_err(|e| anyhow!("Failed to parse Monday.com filtered query response: {}", e))?;
+
+        if !error_response.errors.is_empty() {
+            let error_messages: Vec<String> = error_response
+                .errors
+                .iter()
+                .map(|e| {
+                    if e.error_code.is_empty() {
+                        e.message.clone()
+                    } else {
+                        format!("{} (code: {})", e.message, e.error_code)
+                    }
+                })
+                .collect();
+
+            return Err(anyhow!(
+                "Monday.com API errors while querying filtered items: {}",
+                error_messages.join(", ")
+            ));
         }
 
         // Parse the response

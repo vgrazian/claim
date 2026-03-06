@@ -1,5 +1,5 @@
 use crate::cache::EntryCache;
-use crate::monday::{is_user_item, Item, MondayClient, MondayUser};
+use crate::monday::{Item, MondayClient, MondayUser};
 use crate::{
     calculate_working_dates, get_year_group_id, map_activity_value_to_name, normalize_date,
     truncate_string, validate_date,
@@ -188,33 +188,38 @@ pub async fn handle_query_command(
     if verbose {
         println!("Using group ID: {} for year: {}", group_id, current_year);
     }
-    // OPTIMIZATION #1: Use combined query to fetch board + items in single API call
-    // OPTIMIZATION #3: In-memory cache - repeated queries return cached results
-    let (_board_with_items, all_items, cache_hit) = client
-        .query_board_with_items_optimized(
-            board_id, &group_id, user.id, 500, // Fetch up to 500 items
+    // Use server-side filtering for user + date range (same strategy as TUI).
+    // This avoids missing relevant user items when the group has many entries.
+    let date_strings: Vec<String> = date_range
+        .iter()
+        .map(|d| d.format("%Y-%m-%d").to_string())
+        .collect();
+
+    let all_items = client
+        .query_items_with_filters(
+            board_id,
+            &group_id,
+            user.id,
+            &date_strings,
+            500, // Monday API maximum for items_page(limit)
             verbose,
         )
         .await?;
 
-    if !cache_hit {
-        metrics.api_calls += 1; // Second API call for items (only if cache miss)
-    }
-    metrics.cache_hit = cache_hit;
+    metrics.api_calls += 1; // Second API call for items
+    metrics.cache_hit = false;
     metrics.items_fetched = all_items.len();
     if verbose {
-        println!("Fetched {} items from API", all_items.len());
+        println!(
+            "Fetched {} items from API (server-side filtered by user/date)",
+            all_items.len()
+        );
     }
 
-    // Client-side filtering (server-side filtering doesn't work reliably)
-    // Filter by user, date range, customer, and work item
+    // Apply optional client-side filters that are not enforced by query_items_with_filters.
     let filtered_items: Vec<Item> = all_items
         .into_iter()
         .filter(|item| {
-            // Filter by user
-            is_user_item(item, user.id) &&
-            // Filter by date range
-            is_item_matching_date_range(item, &date_range) &&
             // Filter by customer if provided
             matches_filter(item, CUSTOMER_COLUMN_ID, &customer) &&
             // Filter by work item if provided
@@ -226,7 +231,7 @@ pub async fn handle_query_command(
 
     if verbose {
         println!(
-            "After filtering: {} items (user + date + customer + work_item)",
+            "After filtering: {} items (customer + work_item)",
             filtered_items.len()
         );
     }
