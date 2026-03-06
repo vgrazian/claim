@@ -16,6 +16,7 @@
 
 # Project-specific
 /note.md
+.bobmodes
 
 # Temporary files
 *.tmp
