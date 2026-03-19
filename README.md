@@ -27,6 +27,8 @@ claim - Monday.com claim management tool
 
 **claim** **delete** [*DELETE_OPTIONS*]
 
+**claim** **chat** [*CHAT_OPTIONS*]
+
 ## DESCRIPTION
 
 **claim** is a command-line application for processing claims with Monday.com API integration. It provides secure API key storage, interactive setup, and functionality to query and add claim entries to Monday.com boards.
@@ -151,6 +153,7 @@ For automation and scripting, all commands are available via CLI:
 claim query [OPTIONS]
 claim add [OPTIONS]
 claim delete [OPTIONS]
+claim chat [OPTIONS]
 ```
 
 ## COMMANDS
@@ -463,6 +466,74 @@ claim delete -D 2025-12-10 -c "TEST" -w "DELETE.ME" -y
 ```
 
 **Delete with verbose output to see details:**
+### chat
+
+Chat with Monday.com board using the Model Context Protocol (MCP) server.
+
+```bash
+claim chat [--board BOARD_ID] [-v]
+```
+
+**Options:**
+
+- `-b, --board BOARD_ID`: Board ID to chat with (default: 6500270039)
+- `-v, --verbose`: Verbose output
+
+**Examples:**
+
+```bash
+# Start chat with default board
+claim chat
+
+# Chat with specific board
+claim chat --board 1234567890
+
+# Chat with verbose output
+claim chat -v
+```
+
+**Interactive Chat Session:**
+
+```plaintext
+╔════════════════════════════════════════════════════════════╗
+║          Monday.com Board Chat (MCP-powered)              ║
+╚════════════════════════════════════════════════════════════╝
+
+Board ID: 6500270039
+
+You can ask questions about the board, entries, or request actions.
+Type 'exit' or 'quit' to end the chat session.
+
+You: Show me my entries from last week
+Assistant: Here are your entries from last week...
+
+You: How many hours did I work on Customer A?
+Assistant: You worked 42 hours on Customer A this month...
+
+You: exit
+Goodbye! 👋
+```
+
+**Configuration:**
+
+The chat feature requires MCP server configuration in `.bob/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "monday": {
+      "type": "sse",
+      "url": "https://mcp.monday.com/sse",
+      "headers": {
+        "Authorization": "YOUR_MONDAY_API_TOKEN"
+      }
+    }
+  }
+}
+```
+
+For detailed information, see the [Chat Feature Documentation](docs/features/chat.md).
+
 
 ```bash
 claim delete -x 9971372083 -v
@@ -706,6 +777,7 @@ None - all changes are backward compatible. Existing cache files will be automat
 For detailed documentation, see the [docs/](docs/) directory:
 
 - **[Interactive UI Guide](docs/features/interactive-ui.md)** - Complete guide to the terminal interface
+- **[Chat Feature](docs/features/chat.md)** - MCP-powered conversational interface
 - **[Cache System](docs/features/cache-system.md)** - Understanding the caching feature
 - **[Testing Guide](docs/development/testing.md)** - Running and writing tests
 - **[Implementation Guide](docs/development/implementation-guide.md)** - Technical details

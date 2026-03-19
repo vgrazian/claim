@@ -1,5 +1,6 @@
 mod add;
 mod cache;
+mod chat;
 mod config;
 mod delete;
 mod error;
@@ -55,6 +56,16 @@ enum Commands {
         /// Work item to filter by
         #[arg(short = 'w', long = "wi")] // NEW: Work item filter for query
         work_item: Option<String>,
+
+        /// Verbose output
+        #[arg(short = 'v', long = "verbose")]
+        verbose: bool,
+    },
+    /// Chat with Monday.com board using MCP
+    Chat {
+        /// Board ID to chat with (default: 6500270039)
+        #[arg(short = 'b', long = "board")]
+        board_id: Option<String>,
 
         /// Verbose output
         #[arg(short = 'v', long = "verbose")]
@@ -154,6 +165,7 @@ async fn run(cli: Cli) -> Result<()> {
         Some(Commands::Query { verbose, .. }) => *verbose,
         Some(Commands::Add { verbose, .. }) => *verbose,
         Some(Commands::Delete { verbose, .. }) => *verbose,
+        Some(Commands::Chat { verbose, .. }) => *verbose,
         None => false,
     };
 
@@ -268,6 +280,9 @@ async fn run(cli: Cli) -> Result<()> {
                 verbose,
             )
             .await?;
+        }
+        Some(Commands::Chat { board_id, verbose }) => {
+            chat::handle_chat_command(board_id, verbose).await?;
         }
         None => {
             // Launch interactive UI when no command is provided
