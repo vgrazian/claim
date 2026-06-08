@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fixed to parse JSON value field properly (like CLI does) to extract status index
   - Changed default from vacation (0) to billable (1) for unparseable entries
   - TUI now correctly displays billable, presales, illness entries instead of showing them as vacation
+- **CRITICAL**: TUI not displaying customer and work item information
+  - Root cause: `extract_customer_from_item()` and `extract_work_item_from_item()` used wrong column IDs (`text` and `text8` instead of `text__1` and `text8__1`)
+  - Fixed column IDs to match CLI implementation
+  - TUI week view now correctly displays customer and work item for all entries
 - Week view incorrectly treating empty days as 8-hour vacation days
   - Removed logic that added 8 hours to weekly total for blank days
   - Weekly totals now accurately reflect only actual entries

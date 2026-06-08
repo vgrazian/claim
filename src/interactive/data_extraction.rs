@@ -49,7 +49,7 @@ pub fn extract_activity_value_from_item(item: &Item) -> i32 {
 pub fn extract_customer_from_item(item: &Item) -> String {
     item.column_values
         .iter()
-        .find(|cv| cv.id.as_deref() == Some("text"))
+        .find(|cv| cv.id.as_deref() == Some("text__1"))
         .and_then(|cv| cv.text.clone())
         .unwrap_or_default()
 }
@@ -58,7 +58,7 @@ pub fn extract_customer_from_item(item: &Item) -> String {
 pub fn extract_work_item_from_item(item: &Item) -> String {
     item.column_values
         .iter()
-        .find(|cv| cv.id.as_deref() == Some("text8"))
+        .find(|cv| cv.id.as_deref() == Some("text8__1"))
         .and_then(|cv| cv.text.clone())
         .unwrap_or_default()
 }
