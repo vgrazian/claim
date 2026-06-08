@@ -110,12 +110,8 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             }
         }
 
-        // For blank days (no entries), calculate as 8 hours for the total with blanks
-        if entries.is_empty() {
-            week_total_with_blanks += 8.0;
-        } else {
-            week_total_with_blanks += daily_total;
-        }
+        // Add daily total to week total (no special handling for blank days)
+        week_total_with_blanks += daily_total;
 
         let style = if daily_total >= 8.0 {
             Style::default().fg(Color::Green)

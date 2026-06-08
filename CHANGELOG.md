@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Hardcoded entry: Customer "PRESALES", Work Item "M.34212", Hours "8"
   - Displayed in green with bold styling for easy identification
   - Automatically sets hours to 8 when selected
+
+### Fixed
+- Week view incorrectly treating empty days as 8-hour vacation days
+  - Removed logic that added 8 hours to weekly total for blank days
+  - Weekly totals now accurately reflect only actual entries
 - Secure API key storage using system keyring (macOS Keychain, Windows Credential Manager, Linux Secret Service)
 - Automatic migration from file-based to keyring-based storage
 
