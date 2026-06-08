@@ -7,7 +7,6 @@ mod interactive;
 mod logging;
 mod monday;
 mod query;
-mod selenium;
 mod time;
 mod utils;
 

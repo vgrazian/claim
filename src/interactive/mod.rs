@@ -5,12 +5,14 @@
 
 pub mod activity_types;
 pub mod app;
+pub mod data_extraction;
 pub mod dialogs;
 pub mod entry_details;
 pub mod events;
 pub mod form;
 pub mod form_ui;
 pub mod messages;
+pub mod report;
 pub mod summary_chart;
 pub mod ui;
 pub mod utils;

@@ -486,7 +486,7 @@ fn render_report(f: &mut Frame, app: &App, area: Rect) {
                 if app
                     .marked_report_items
                     .iter()
-                    .any(|m| item_key.len() > 0 && label.contains(m))
+                    .any(|m| !item_key.is_empty() && label.contains(m))
                 {
                     format!("* {}", label)
                 } else {
@@ -577,7 +577,7 @@ fn render_report(f: &mut Frame, app: &App, area: Rect) {
                     if app
                         .marked_report_items
                         .iter()
-                        .any(|m| item_key.len() > 0 && label.contains(m))
+                        .any(|m| !item_key.is_empty() && label.contains(m))
                     {
                         format!("* {}", label)
                     } else {

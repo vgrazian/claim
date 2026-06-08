@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use directories::ProjectDirs;
+use keyring::Entry;
 use serde::{Deserialize, Serialize};
 use std::io;
 
@@ -14,11 +15,55 @@ impl Config {
     }
 
     pub fn get_config_path() -> Option<std::path::PathBuf> {
-        ProjectDirs::from("com", "yourname", "claim")
+        ProjectDirs::from("com", "vgrazian", "claim")
             .map(|proj_dirs| proj_dirs.config_dir().join("config.json"))
     }
 
+    /// Load API key from secure keyring storage
+    /// Falls back to file-based storage for backward compatibility
     pub fn load() -> Result<Self> {
+        // Try to load from keyring first
+        match Self::load_from_keyring() {
+            Ok(config) => Ok(config),
+            Err(_) => {
+                // Fall back to file-based storage for backward compatibility
+                match Self::load_from_file() {
+                    Ok(config) => {
+                        // Migrate to keyring
+                        if let Err(e) = config.save_to_keyring() {
+                            eprintln!(
+                                "Warning: Failed to migrate API key to secure storage: {}",
+                                e
+                            );
+                        } else {
+                            println!("✅ API key migrated to secure system keyring");
+                            // Optionally remove old file
+                            if let Some(path) = Self::get_config_path() {
+                                let _ = std::fs::remove_file(path);
+                            }
+                        }
+                        Ok(config)
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+        }
+    }
+
+    /// Load API key from system keyring
+    fn load_from_keyring() -> Result<Self> {
+        let entry = Entry::new("claim", "monday_api_key")
+            .map_err(|e| anyhow!("Failed to access keyring: {}", e))?;
+
+        let api_key = entry
+            .get_password()
+            .map_err(|e| anyhow!("Failed to retrieve API key from keyring: {}", e))?;
+
+        Ok(Config { api_key })
+    }
+
+    /// Load API key from file (legacy method for backward compatibility)
+    fn load_from_file() -> Result<Self> {
         let config_path = Self::get_config_path()
             .ok_or_else(|| anyhow!("Could not determine config directory"))?;
 
@@ -35,7 +80,26 @@ impl Config {
         Ok(config)
     }
 
+    /// Save API key to secure keyring storage
     pub fn save(&self) -> Result<()> {
+        self.save_to_keyring()
+    }
+
+    /// Save API key to system keyring
+    fn save_to_keyring(&self) -> Result<()> {
+        let entry = Entry::new("claim", "monday_api_key")
+            .map_err(|e| anyhow!("Failed to access keyring: {}", e))?;
+
+        entry
+            .set_password(&self.api_key)
+            .map_err(|e| anyhow!("Failed to save API key to keyring: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Save API key to file (legacy method, kept for testing)
+    #[allow(dead_code)]
+    fn save_to_file(&self) -> Result<()> {
         let config_path = Self::get_config_path()
             .ok_or_else(|| anyhow!("Could not determine config directory"))?;
 
@@ -56,7 +120,7 @@ impl Config {
     pub fn prompt_for_api_key() -> String {
         println!("Please enter your Monday.com API key:");
         println!("You can find it at: https://your-account.monday.com/admin/integrations/api");
-        println!("Note: Your API key will be stored securely in your system's config directory.");
+        println!("Note: Your API key will be stored securely in your system's keyring.");
 
         let mut api_key = String::new();
         io::stdin()
@@ -158,28 +222,6 @@ mod tests {
 
         let loaded = loaded_config.unwrap();
         assert_eq!(loaded.api_key, "test-api-key");
-    }
-
-    #[test]
-    fn test_config_save_and_load_integration() {
-        let _temp_dir = setup_test_env();
-
-        // This test uses the actual save/load methods but may fail due to directories crate caching
-        // We'll mark it as should_panic and provide a better test above
-        let config = Config::new("test-api-key".to_string());
-
-        // Save should work
-        let save_result = config.save();
-        if save_result.is_ok() {
-            // If save worked, try to load
-            let loaded_config = Config::load();
-            if loaded_config.is_ok() {
-                let loaded = loaded_config.unwrap();
-                assert_eq!(loaded.api_key, "test-api-key");
-            }
-            // If load fails, it's likely due to directories crate issues, not our code
-        }
-        // If save fails, it's likely due to directories crate issues, not our code
     }
 
     #[test]
@@ -302,3 +344,5 @@ mod tests {
         assert_eq!(loaded_config.api_key, special_key);
     }
 }
+
+// Made with Bob

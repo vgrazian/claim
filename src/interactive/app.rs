@@ -8,8 +8,10 @@ use crate::cache::EntryCache;
 use crate::monday::{Item, MondayClient, MondayUser};
 use crate::utils;
 
+use super::data_extraction::*;
 use super::form::FormData;
 use super::messages::{Message, MessageType};
+use super::report;
 
 /// Application mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,233 +67,17 @@ impl App {
     /// Build textual lines for the report rows in the same order as UI rendering.
     /// Returns the text for each data row (excluding header).
     pub fn get_report_rows_text(&self) -> Result<Vec<String>, anyhow::Error> {
-        use std::collections::HashMap;
-
-        // Build report_data like in ui::render_report
-        let mut report_data: HashMap<(i32, String, String), [f64; 5]> = HashMap::new();
-
-        for entry in &self.claims {
-            let key = (
-                entry.activity_value,
-                entry.customer.clone(),
-                entry.work_item.clone(),
-            );
-            let day_index = entry.date.weekday().num_days_from_monday() as usize;
-            if day_index < 5 {
-                report_data.entry(key).or_insert([0.0; 5])[day_index] += entry.hours;
-            }
-        }
-
-        let mut billable_data: Vec<_> = report_data
-            .iter()
-            .filter(|((activity_value, _, _), _)| *activity_value == 1)
-            .map(|((_, customer, work_item), hours)| {
-                ((customer.clone(), work_item.clone()), *hours)
-            })
-            .collect();
-
-        let mut non_billable_data: Vec<_> = report_data
-            .iter()
-            .filter(|((activity_value, _, _), _)| *activity_value != 1)
-            .map(|((activity_value, customer, work_item), hours)| {
-                (
-                    (*activity_value, customer.clone(), work_item.clone()),
-                    *hours,
-                )
-            })
-            .collect();
-
-        // Sort billable by customer/work_item
-        billable_data.sort_by(|a, b| match a.0 .0.cmp(&b.0 .0) {
-            std::cmp::Ordering::Equal => a.0 .1.cmp(&b.0 .1),
-            other => other,
-        });
-
-        // Sort non-billable by activity type, then customer/work_item
-        non_billable_data.sort_by(|a, b| match a.0 .0.cmp(&b.0 .0) {
-            std::cmp::Ordering::Equal => match a.0 .1.cmp(&b.0 .1) {
-                std::cmp::Ordering::Equal => a.0 .2.cmp(&b.0 .2),
-                other => other,
-            },
-            other => other,
-        });
-
-        let mut rows_text = Vec::new();
-
-        // Helper to format a row into text
-        let format_row = |label: String, hours: [f64; 5]| -> String {
-            let mut parts = Vec::new();
-            parts.push(label);
-            for i in 0..5 {
-                if hours[i] == 0.0 {
-                    parts.push(String::new());
-                } else if hours[i] % 1.0 == 0.0 {
-                    parts.push(format!("{:.0}", hours[i]));
-                } else {
-                    parts.push(format!("{:.2}", hours[i]));
-                }
-            }
-            let total: f64 = hours.iter().sum();
-            if total % 1.0 == 0.0 {
-                parts.push(format!("{:.0}", total));
-            } else {
-                parts.push(format!("{:.2}", total));
-            }
-            parts.join("\t")
-        };
-
-        for ((customer, work_item), hours) in billable_data {
-            let label = if !work_item.is_empty() && !customer.is_empty() {
-                format!("{} - {}", work_item, customer)
-            } else if !work_item.is_empty() {
-                work_item
-            } else {
-                customer
-            };
-            rows_text.push(format_row(label, hours));
-        }
-
-        if !non_billable_data.is_empty() {
-            // Add a separator line to match UI
-            rows_text.push("---".to_string());
-        }
-
-        for ((activity_value, customer, work_item), hours) in non_billable_data {
-            // Convert activity_value to name if possible
-            let activity_name = crate::utils::map_activity_value_to_name(activity_value as u8);
-            let label = if !work_item.is_empty() && !customer.is_empty() {
-                format!("{} - {} ({})", work_item, customer, activity_name)
-            } else if !work_item.is_empty() {
-                format!("{} ({})", work_item, activity_name)
-            } else if !customer.is_empty() {
-                format!("{} ({})", customer, activity_name)
-            } else {
-                activity_name.to_string()
-            };
-            rows_text.push(format_row(label, hours));
-        }
-
-        // Add totals line
-        let mut day_totals = [0.0; 5];
-        for hours in report_data.values() {
-            for i in 0..5 {
-                day_totals[i] += hours[i];
-            }
-        }
-        let total_label = "Total".to_string();
-        rows_text.push(format_row(total_label, day_totals));
-
-        Ok(rows_text)
+        report::get_report_rows_text(&self.claims)
     }
 
     /// Get textual representation for a single report row index (0-based)
     pub fn get_report_row_text(&self, idx: usize) -> Result<String, anyhow::Error> {
-        let rows = self.get_report_rows_text()?;
-        if idx < rows.len() {
-            Ok(rows[idx].clone())
-        } else {
-            Err(anyhow::anyhow!("Row index out of range"))
-        }
+        report::get_report_row_text(&self.claims, idx)
     }
 
-    /// Get a sensible work-item/label for a report row index. This prefers the work_item
-    /// if present, otherwise falls back to customer or activity name. For totals/separators
-    /// the full row text is returned.
+    /// Get a sensible work-item/label for a report row index
     pub fn get_report_row_work_item(&self, idx: usize) -> Result<String, anyhow::Error> {
-        use std::collections::HashMap;
-
-        // Build the same structures as in get_report_rows_text
-        let mut report_data: HashMap<(i32, String, String), [f64; 5]> = HashMap::new();
-
-        for entry in &self.claims {
-            let key = (
-                entry.activity_value,
-                entry.customer.clone(),
-                entry.work_item.clone(),
-            );
-            let day_index = entry.date.weekday().num_days_from_monday() as usize;
-            if day_index < 5 {
-                report_data.entry(key).or_insert([0.0; 5])[day_index] += entry.hours;
-            }
-        }
-
-        let mut billable_data: Vec<_> = report_data
-            .iter()
-            .filter(|((activity_value, _, _), _)| *activity_value == 1)
-            .map(|((_, customer, work_item), hours)| {
-                ((customer.clone(), work_item.clone()), *hours)
-            })
-            .collect();
-
-        let mut non_billable_data: Vec<_> = report_data
-            .iter()
-            .filter(|((activity_value, _, _), _)| *activity_value != 1)
-            .map(|((activity_value, customer, work_item), hours)| {
-                (
-                    (*activity_value, customer.clone(), work_item.clone()),
-                    *hours,
-                )
-            })
-            .collect();
-
-        // Sort same as rows builder
-        billable_data.sort_by(|a, b| match a.0 .0.cmp(&b.0 .0) {
-            std::cmp::Ordering::Equal => a.0 .1.cmp(&b.0 .1),
-            other => other,
-        });
-
-        non_billable_data.sort_by(|a, b| match a.0 .0.cmp(&b.0 .0) {
-            std::cmp::Ordering::Equal => match a.0 .1.cmp(&b.0 .1) {
-                std::cmp::Ordering::Equal => a.0 .2.cmp(&b.0 .2),
-                other => other,
-            },
-            other => other,
-        });
-
-        // Build list of labels/work_items parallel to rows_text
-        let mut items: Vec<String> = Vec::new();
-
-        for ((customer, work_item), _hours) in billable_data {
-            // Prefer work_item if present, otherwise customer
-            if !work_item.is_empty() {
-                items.push(work_item);
-            } else if !customer.is_empty() {
-                items.push(customer);
-            } else {
-                items.push(String::new());
-            }
-        }
-
-        if !non_billable_data.is_empty() {
-            items.push("---".to_string());
-        }
-
-        for ((activity_value, customer, work_item), _hours) in non_billable_data {
-            if !work_item.is_empty() {
-                items.push(work_item);
-            } else if !customer.is_empty() {
-                items.push(customer);
-            } else {
-                let activity_name = crate::utils::map_activity_value_to_name(activity_value as u8);
-                items.push(activity_name.to_string());
-            }
-        }
-
-        // Totals label
-        let mut day_totals = [0.0; 5];
-        for hours in report_data.values() {
-            for i in 0..5 {
-                day_totals[i] += hours[i];
-            }
-        }
-        let _total_label = "Total".to_string();
-        items.push(_total_label);
-
-        if idx < items.len() {
-            Ok(items[idx].clone())
-        } else {
-            Err(anyhow::anyhow!("Row index out of range"))
-        }
+        report::get_report_row_work_item(&self.claims, idx)
     }
 }
 
@@ -653,7 +439,7 @@ impl App {
                                 } else {
                                     self.messages.push(Message::new(
                                         MessageType::Success,
-                                        format!("Copied item to clipboard"),
+                                        "Copied item to clipboard".to_string(),
                                     ));
                                 }
                             }
@@ -1151,26 +937,24 @@ impl App {
                             form.previous_field();
                             form.update_cursor_for_field();
                         }
+                    } else if form.focus_on_cache
+                        || form.focus_on_quick_buffer
+                        || form.focus_on_activity
+                    {
+                        form.focus_on_cache = false;
+                        form.focus_on_quick_buffer = false;
+                        form.focus_on_activity = false;
+                    } else if form.current_field == super::form::FormField::ActivityType {
+                        form.toggle_activity_focus();
+                    } else if form.current_field == super::form::FormField::QuickSelection
+                        || form.current_field == super::form::FormField::Date
+                    {
+                        form.toggle_quick_buffer();
+                    } else if allowed_for_cache {
+                        form.toggle_focus();
                     } else {
-                        if form.focus_on_cache
-                            || form.focus_on_quick_buffer
-                            || form.focus_on_activity
-                        {
-                            form.focus_on_cache = false;
-                            form.focus_on_quick_buffer = false;
-                            form.focus_on_activity = false;
-                        } else if form.current_field == super::form::FormField::ActivityType {
-                            form.toggle_activity_focus();
-                        } else if form.current_field == super::form::FormField::QuickSelection
-                            || form.current_field == super::form::FormField::Date
-                        {
-                            form.toggle_quick_buffer();
-                        } else if allowed_for_cache {
-                            form.toggle_focus();
-                        } else {
-                            form.next_field();
-                            form.update_cursor_for_field();
-                        }
+                        form.next_field();
+                        form.update_cursor_for_field();
                     }
                 }
                 KeyCode::BackTab => {
@@ -1803,89 +1587,4 @@ impl App {
         Ok(())
     }
 }
-/// Get the Monday of the week containing the given date
-fn get_week_start(date: NaiveDate) -> NaiveDate {
-    let weekday = date.weekday().num_days_from_monday();
-    date - chrono::Duration::days(weekday as i64)
-}
-
-// Helper functions to extract data from Monday.com items
-
-fn extract_date_from_item(item: &Item) -> Option<NaiveDate> {
-    for col in &item.column_values {
-        if col.id.as_deref() == Some("date4") {
-            if let Some(text) = &col.text {
-                if let Ok(date) = NaiveDate::parse_from_str(text, "%Y-%m-%d") {
-                    return Some(date);
-                }
-            }
-        }
-    }
-    None
-}
-
-fn extract_activity_value_from_item(item: &Item) -> i32 {
-    for col in &item.column_values {
-        if col.id.as_deref() == Some("status") {
-            // Parse from the value field which contains JSON like {"index": 1}
-            if let Some(value) = &col.value {
-                if let Ok(parsed_value) = serde_json::from_str::<serde_json::Value>(value) {
-                    if let Some(status_index) = parsed_value.get("index") {
-                        if let Some(index_num) = status_index.as_i64() {
-                            return index_num as i32;
-                        }
-                    }
-                }
-            }
-        }
-    }
-    1 // Default to billable
-}
-
-fn extract_customer_from_item(item: &Item) -> String {
-    for col in &item.column_values {
-        if col.id.as_deref() == Some("text__1") {
-            if let Some(text) = &col.text {
-                return text.clone();
-            }
-        }
-    }
-    String::new()
-}
-
-fn extract_work_item_from_item(item: &Item) -> String {
-    for col in &item.column_values {
-        if col.id.as_deref() == Some("text8__1") {
-            if let Some(text) = &col.text {
-                return text.clone();
-            }
-        }
-    }
-    String::new()
-}
-
-fn extract_hours_from_item(item: &Item) -> f64 {
-    for col in &item.column_values {
-        if col.id.as_deref() == Some("numbers__1") {
-            if let Some(text) = &col.text {
-                return text.parse().unwrap_or(0.0);
-            }
-        }
-    }
-    0.0
-}
-
-fn extract_comment_from_item(item: &Item) -> Option<String> {
-    for col in &item.column_values {
-        if col.id.as_deref() == Some("text") {
-            if let Some(text) = &col.text {
-                if !text.is_empty() {
-                    return Some(text.clone());
-                }
-            }
-        }
-    }
-    None
-}
-
 // Made with Bob

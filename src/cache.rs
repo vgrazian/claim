@@ -32,7 +32,7 @@ impl EntryCache {
 
     /// Get the cache file path
     pub fn get_cache_path() -> Option<PathBuf> {
-        ProjectDirs::from("com", "yourname", "claim")
+        ProjectDirs::from("com", "vgrazian", "claim")
             .map(|proj_dirs| proj_dirs.cache_dir().join("entries_cache.json"))
     }
 
