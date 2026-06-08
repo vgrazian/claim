@@ -176,16 +176,24 @@ pub fn render_cache_panel_with_selection(f: &mut Frame, app: &App, area: Rect) {
         None
     };
 
-    // Only show 9 billable entries (already filtered during cache refresh)
+    // Show up to 10 entries (0-9), with PRESALES hardcoded as option 0
     let items: Vec<ListItem> = entries
         .iter()
-        .take(9)
+        .take(10)
         .enumerate()
         .map(|(i, entry)| {
             let is_selected = selected_index == Some(i);
+
+            // Special styling for PRESALES entry (option 0)
+            let is_presales = i == 0 && entry.customer == "PRESALES";
+
             let style = if is_selected {
                 Style::default()
                     .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            } else if is_presales {
+                Style::default()
+                    .fg(Color::Green)
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::White)
@@ -197,10 +205,18 @@ pub fn render_cache_panel_with_selection(f: &mut Frame, app: &App, area: Rect) {
             } else {
                 " ".to_string()
             };
-            let content = format!(
-                "{}{} {} | {}",
-                prefix, number, entry.customer, entry.work_item
-            );
+
+            let content = if is_presales {
+                format!(
+                    "{}{} {} | {} (8h)",
+                    prefix, number, entry.customer, entry.work_item
+                )
+            } else {
+                format!(
+                    "{}{} {} | {}",
+                    prefix, number, entry.customer, entry.work_item
+                )
+            };
 
             ListItem::new(content).style(style)
         })

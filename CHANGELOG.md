@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- PRESALES quick-add option as option 0 in TUI quick selection list
+  - Hardcoded entry: Customer "PRESALES", Work Item "M.34212", Hours "8"
+  - Displayed in green with bold styling for easy identification
+  - Automatically sets hours to 8 when selected
 - Secure API key storage using system keyring (macOS Keychain, Windows Credential Manager, Linux Secret Service)
 - Automatic migration from file-based to keyring-based storage
 

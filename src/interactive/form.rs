@@ -204,9 +204,16 @@ impl FormData {
     }
 
     /// Select cache entry (fill customer and work item)
+    /// For PRESALES entry, also sets hours to 8
     pub fn apply_cache_entry(&mut self, customer: String, work_item: String) {
-        self.customer = customer;
+        self.customer = customer.clone();
         self.work_item = work_item;
+
+        // Special handling for PRESALES entry - set hours to 8
+        if customer == "PRESALES" {
+            self.hours = "8".to_string();
+        }
+
         self.focus_on_cache = false;
         self.current_field = FormField::Hours;
     }

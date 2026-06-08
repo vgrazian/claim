@@ -140,9 +140,17 @@ impl EntryCache {
 
     /// Get unique entries (deduplicated by customer + work_item) for a specific user
     /// Filters out test entries (TEST.DELETE.ME.*)
+    /// Prepends a hardcoded PRESALES entry as option 0
     pub fn get_unique_entries(&self, user_id: i64) -> Vec<CachedEntry> {
         let mut seen = std::collections::HashSet::new();
         let mut unique = Vec::new();
+
+        // Add hardcoded PRESALES entry as option 0
+        unique.push(CachedEntry {
+            customer: "PRESALES".to_string(),
+            work_item: "M.34212".to_string(),
+            last_used: Local::now().format("%Y-%m-%d").to_string(),
+        });
 
         for entry in self.get_sorted_entries(user_id) {
             // Filter out test entries
@@ -310,7 +318,11 @@ mod tests {
         cache.entries.insert(TEST_USER_ID, user_entries);
 
         let unique = cache.get_unique_entries(TEST_USER_ID);
-        assert_eq!(unique.len(), 2);
+        // Should have 3 entries: PRESALES (hardcoded) + 2 unique user entries
+        assert_eq!(unique.len(), 3);
+        // First entry should be PRESALES
+        assert_eq!(unique[0].customer, "PRESALES");
+        assert_eq!(unique[0].work_item, "M.34212");
     }
 
     #[test]
@@ -417,9 +429,11 @@ mod tests {
         cache.add_entry(200, "Customer B".to_string(), "WI-002".to_string(), date);
 
         assert_eq!(cache.entries.len(), 2);
-        assert_eq!(cache.get_unique_entries(100).len(), 1);
-        assert_eq!(cache.get_unique_entries(200).len(), 1);
-        assert_eq!(cache.get_unique_entries(300).len(), 0);
+        // Each user gets PRESALES + their own entry = 2 entries
+        assert_eq!(cache.get_unique_entries(100).len(), 2);
+        assert_eq!(cache.get_unique_entries(200).len(), 2);
+        // User 300 has no entries, but still gets PRESALES = 1 entry
+        assert_eq!(cache.get_unique_entries(300).len(), 1);
     }
 }
 
