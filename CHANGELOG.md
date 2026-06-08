@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Automatically sets hours to 8 when selected
 
 ### Fixed
+- **CRITICAL**: TUI showing incorrect activity types (phantom vacation days)
+  - Root cause: `extract_activity_value_from_item()` was only parsing text field and defaulting to 0 (vacation) on failure
+  - Fixed to parse JSON value field properly (like CLI does) to extract status index
+  - Changed default from vacation (0) to billable (1) for unparseable entries
+  - TUI now correctly displays billable, presales, illness entries instead of showing them as vacation
 - Week view incorrectly treating empty days as 8-hour vacation days
   - Removed logic that added 8 hours to weekly total for blank days
   - Weekly totals now accurately reflect only actual entries

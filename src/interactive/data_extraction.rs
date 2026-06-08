@@ -23,13 +23,26 @@ pub fn extract_date_from_item(item: &Item) -> Option<NaiveDate> {
 }
 
 /// Extract activity value from a Monday.com item
+/// Parses the JSON value field to get the status index, which maps to activity types
 pub fn extract_activity_value_from_item(item: &Item) -> i32 {
     item.column_values
         .iter()
         .find(|cv| cv.id.as_deref() == Some("status"))
-        .and_then(|cv| cv.text.as_ref())
-        .and_then(|text| text.parse::<i32>().ok())
-        .unwrap_or(0)
+        .and_then(|cv| {
+            // First try to parse from JSON value field (contains {"index": N})
+            if let Some(value) = &cv.value {
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(value) {
+                    if let Some(index) = parsed.get("index") {
+                        if let Some(index_num) = index.as_i64() {
+                            return Some(index_num as i32);
+                        }
+                    }
+                }
+            }
+            // Fallback: try to parse from text field
+            cv.text.as_ref().and_then(|text| text.parse::<i32>().ok())
+        })
+        .unwrap_or(1) // Default to billable (1) instead of vacation (0)
 }
 
 /// Extract customer name from a Monday.com item
@@ -103,7 +116,8 @@ mod tests {
             column_values: vec![],
         };
 
-        assert_eq!(extract_activity_value_from_item(&item), 0);
+        // Default to billable (1) when no status column is found
+        assert_eq!(extract_activity_value_from_item(&item), 1);
     }
 
     #[test]
