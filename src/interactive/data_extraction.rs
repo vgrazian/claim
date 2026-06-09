@@ -67,7 +67,7 @@ pub fn extract_work_item_from_item(item: &Item) -> String {
 pub fn extract_hours_from_item(item: &Item) -> f64 {
     item.column_values
         .iter()
-        .find(|cv| cv.id.as_deref() == Some("numbers"))
+        .find(|cv| cv.id.as_deref() == Some("numbers__1"))
         .and_then(|cv| cv.text.as_ref())
         .and_then(|text| text.parse::<f64>().ok())
         .unwrap_or(0.0)
