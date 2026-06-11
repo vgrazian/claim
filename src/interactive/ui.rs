@@ -109,8 +109,8 @@ fn render_main_content(f: &mut Frame, app: &App, area: Rect) {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Percentage(50), // Week view
-                Constraint::Percentage(25), // Entry details
-                Constraint::Percentage(25), // Summary chart
+                Constraint::Percentage(20), // Entry details
+                Constraint::Percentage(30), // Summary charts (increased from 25%)
             ])
             .split(area);
 
@@ -120,8 +120,20 @@ fn render_main_content(f: &mut Frame, app: &App, area: Rect) {
         // Render entry details panel
         entry_details::render(f, app, content_chunks[1]);
 
-        // Render summary chart
-        summary_chart::render(f, app, content_chunks[2]);
+        // Split summary area into weekly and monthly
+        let summary_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(50), // Weekly summary
+                Constraint::Percentage(50), // Monthly summary
+            ])
+            .split(content_chunks[2]);
+
+        // Render weekly summary
+        summary_chart::render_weekly(f, app, summary_chunks[0]);
+
+        // Render monthly summary
+        summary_chart::render_monthly(f, app, summary_chunks[1]);
     }
 }
 

@@ -101,6 +101,7 @@ pub fn map_activity_type_to_value(activity_type: &str) -> u8 {
         "intellectual_capital" => 10,
         "business_development" => 11,
         "overhead" => 12,
+        "l104" => 13,
         _ => {
             println!(
                 "Warning: Unknown activity type '{}', defaulting to billable (1)",
@@ -127,8 +128,77 @@ pub fn map_activity_value_to_name(value: u8) -> String {
         10 => "intellectual_capital".to_string(),
         11 => "business_development".to_string(),
         12 => "overhead".to_string(),
+        13 => "l104".to_string(),
         _ => format!("unknown({})", value),
     }
+}
+
+// ===== L104 VALIDATION =====
+
+/// Maximum allowed L104 days per calendar month
+pub const L104_MAX_DAYS_PER_MONTH: f64 = 3.0;
+
+/// Maximum allowed L104 hours per calendar month (3 days * 8 hours)
+pub const L104_MAX_HOURS_PER_MONTH: f64 = 24.0;
+
+/// Calculate total L104 hours for a given month from a list of entries
+/// Returns (total_hours, total_days, entries_count)
+pub fn calculate_l104_monthly_total(
+    entries: &[(String, String, NaiveDate, String, f64)], // (customer, work_item, date, activity_type, hours)
+    year: i32,
+    month: u32,
+) -> (f64, f64, usize) {
+    let mut total_hours = 0.0;
+    let mut entry_count = 0;
+
+    for (_, _, date, activity_type, hours) in entries {
+        if activity_type.to_lowercase() == "l104" && date.year() == year && date.month() == month {
+            // If hours is 0, assume it's a full day (8 hours)
+            let entry_hours = if *hours > 0.0 { *hours } else { 8.0 };
+            total_hours += entry_hours;
+            entry_count += 1;
+        }
+    }
+
+    let total_days = total_hours / 8.0;
+    (total_hours, total_days, entry_count)
+}
+
+/// Check if adding L104 hours would exceed monthly limit
+/// Returns Ok(()) if within limit, Err with message if would exceed
+pub fn validate_l104_monthly_limit(
+    existing_entries: &[(String, String, NaiveDate, String, f64)],
+    new_date: NaiveDate,
+    new_hours: f64,
+) -> Result<()> {
+    let year = new_date.year();
+    let month = new_date.month();
+
+    let (current_hours, current_days, _) =
+        calculate_l104_monthly_total(existing_entries, year, month);
+
+    // If new_hours is 0, assume it's a full day (8 hours)
+    let hours_to_add = if new_hours > 0.0 { new_hours } else { 8.0 };
+    let new_total_hours = current_hours + hours_to_add;
+    let new_total_days = new_total_hours / 8.0;
+
+    if new_total_hours > L104_MAX_HOURS_PER_MONTH {
+        return Err(anyhow!(
+            "L104 monthly limit exceeded: {} hours ({:.1} days) already used in {}-{:02}. \
+             Adding {:.1} hours would total {:.1} hours ({:.1} days), exceeding the limit of {} hours ({} days).",
+            current_hours,
+            current_days,
+            year,
+            month,
+            hours_to_add,
+            new_total_hours,
+            new_total_days,
+            L104_MAX_HOURS_PER_MONTH,
+            L104_MAX_DAYS_PER_MONTH
+        ));
+    }
+
+    Ok(())
 }
 
 // ===== MONDAY.COM UTILITIES =====
@@ -271,6 +341,7 @@ mod tests {
         assert_eq!(map_activity_type_to_value("billable"), 1);
         assert_eq!(map_activity_type_to_value("vacation"), 0);
         assert_eq!(map_activity_type_to_value("holding"), 2);
+        assert_eq!(map_activity_type_to_value("l104"), 13);
         assert_eq!(map_activity_type_to_value("unknown"), 1); // default
 
         assert_eq!(map_activity_value_to_name(1), "billable");
@@ -279,6 +350,7 @@ mod tests {
         assert_eq!(map_activity_value_to_name(10), "intellectual_capital");
         assert_eq!(map_activity_value_to_name(11), "business_development");
         assert_eq!(map_activity_value_to_name(12), "overhead");
+        assert_eq!(map_activity_value_to_name(13), "l104");
         assert_eq!(map_activity_value_to_name(99), "unknown(99)");
     }
 
@@ -287,5 +359,219 @@ mod tests {
         let year = get_current_year();
         let current_year = Local::now().year();
         assert_eq!(year, current_year);
+    }
+
+    #[test]
+    fn test_calculate_l104_monthly_total_empty() {
+        let entries: Vec<(String, String, NaiveDate, String, f64)> = vec![];
+        let (hours, days, count) = calculate_l104_monthly_total(&entries, 2026, 6);
+        assert_eq!(hours, 0.0);
+        assert_eq!(days, 0.0);
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_calculate_l104_monthly_total_with_hours() {
+        let date1 = NaiveDate::from_ymd_opt(2026, 6, 10).unwrap();
+        let date2 = NaiveDate::from_ymd_opt(2026, 6, 15).unwrap();
+        let entries = vec![
+            (
+                "Customer".to_string(),
+                "Work".to_string(),
+                date1,
+                "l104".to_string(),
+                8.0,
+            ),
+            (
+                "Customer".to_string(),
+                "Work".to_string(),
+                date2,
+                "l104".to_string(),
+                8.0,
+            ),
+        ];
+        let (hours, days, count) = calculate_l104_monthly_total(&entries, 2026, 6);
+        assert_eq!(hours, 16.0);
+        assert_eq!(days, 2.0);
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn test_calculate_l104_monthly_total_zero_hours() {
+        let date1 = NaiveDate::from_ymd_opt(2026, 6, 10).unwrap();
+        let entries = vec![(
+            "Customer".to_string(),
+            "Work".to_string(),
+            date1,
+            "l104".to_string(),
+            0.0,
+        )];
+        let (hours, days, count) = calculate_l104_monthly_total(&entries, 2026, 6);
+        assert_eq!(hours, 8.0); // 0 hours treated as full day (8 hours)
+        assert_eq!(days, 1.0);
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_calculate_l104_monthly_total_different_months() {
+        let date1 = NaiveDate::from_ymd_opt(2026, 6, 10).unwrap();
+        let date2 = NaiveDate::from_ymd_opt(2026, 7, 15).unwrap();
+        let entries = vec![
+            (
+                "Customer".to_string(),
+                "Work".to_string(),
+                date1,
+                "l104".to_string(),
+                8.0,
+            ),
+            (
+                "Customer".to_string(),
+                "Work".to_string(),
+                date2,
+                "l104".to_string(),
+                8.0,
+            ),
+        ];
+        let (hours, days, count) = calculate_l104_monthly_total(&entries, 2026, 6);
+        assert_eq!(hours, 8.0); // Only June entry
+        assert_eq!(days, 1.0);
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_calculate_l104_monthly_total_mixed_activity_types() {
+        let date1 = NaiveDate::from_ymd_opt(2026, 6, 10).unwrap();
+        let date2 = NaiveDate::from_ymd_opt(2026, 6, 15).unwrap();
+        let entries = vec![
+            (
+                "Customer".to_string(),
+                "Work".to_string(),
+                date1,
+                "l104".to_string(),
+                8.0,
+            ),
+            (
+                "Customer".to_string(),
+                "Work".to_string(),
+                date2,
+                "billable".to_string(),
+                8.0,
+            ),
+        ];
+        let (hours, days, count) = calculate_l104_monthly_total(&entries, 2026, 6);
+        assert_eq!(hours, 8.0); // Only L104 entry
+        assert_eq!(days, 1.0);
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_validate_l104_monthly_limit_within_limit() {
+        let date1 = NaiveDate::from_ymd_opt(2026, 6, 10).unwrap();
+        let date2 = NaiveDate::from_ymd_opt(2026, 6, 15).unwrap();
+        let entries = vec![(
+            "Customer".to_string(),
+            "Work".to_string(),
+            date1,
+            "l104".to_string(),
+            8.0,
+        )];
+        let result = validate_l104_monthly_limit(&entries, date2, 8.0);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_l104_monthly_limit_at_limit() {
+        let date1 = NaiveDate::from_ymd_opt(2026, 6, 10).unwrap();
+        let date2 = NaiveDate::from_ymd_opt(2026, 6, 15).unwrap();
+        let date3 = NaiveDate::from_ymd_opt(2026, 6, 20).unwrap();
+        let entries = vec![
+            (
+                "Customer".to_string(),
+                "Work".to_string(),
+                date1,
+                "l104".to_string(),
+                8.0,
+            ),
+            (
+                "Customer".to_string(),
+                "Work".to_string(),
+                date2,
+                "l104".to_string(),
+                8.0,
+            ),
+        ];
+        let result = validate_l104_monthly_limit(&entries, date3, 8.0);
+        assert!(result.is_ok()); // 16 + 8 = 24, exactly at limit
+    }
+
+    #[test]
+    fn test_validate_l104_monthly_limit_exceeds() {
+        let date1 = NaiveDate::from_ymd_opt(2026, 6, 10).unwrap();
+        let date2 = NaiveDate::from_ymd_opt(2026, 6, 15).unwrap();
+        let date3 = NaiveDate::from_ymd_opt(2026, 6, 20).unwrap();
+        let entries = vec![
+            (
+                "Customer".to_string(),
+                "Work".to_string(),
+                date1,
+                "l104".to_string(),
+                8.0,
+            ),
+            (
+                "Customer".to_string(),
+                "Work".to_string(),
+                date2,
+                "l104".to_string(),
+                8.0,
+            ),
+            (
+                "Customer".to_string(),
+                "Work".to_string(),
+                date3,
+                "l104".to_string(),
+                8.0,
+            ),
+        ];
+        let date4 = NaiveDate::from_ymd_opt(2026, 6, 25).unwrap();
+        let result = validate_l104_monthly_limit(&entries, date4, 8.0);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("L104 monthly limit exceeded"));
+    }
+
+    #[test]
+    fn test_validate_l104_monthly_limit_different_month() {
+        let date1 = NaiveDate::from_ymd_opt(2026, 6, 10).unwrap();
+        let date2 = NaiveDate::from_ymd_opt(2026, 6, 15).unwrap();
+        let date3 = NaiveDate::from_ymd_opt(2026, 6, 20).unwrap();
+        let entries = vec![
+            (
+                "Customer".to_string(),
+                "Work".to_string(),
+                date1,
+                "l104".to_string(),
+                8.0,
+            ),
+            (
+                "Customer".to_string(),
+                "Work".to_string(),
+                date2,
+                "l104".to_string(),
+                8.0,
+            ),
+            (
+                "Customer".to_string(),
+                "Work".to_string(),
+                date3,
+                "l104".to_string(),
+                8.0,
+            ),
+        ];
+        // Adding to July should be OK even though June is at limit
+        let date4 = NaiveDate::from_ymd_opt(2026, 7, 5).unwrap();
+        let result = validate_l104_monthly_limit(&entries, date4, 8.0);
+        assert!(result.is_ok());
     }
 }

@@ -104,8 +104,9 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
                 daily_total += entry.hours;
             } else if entry.activity_type.to_lowercase().contains("vacation")
                 || entry.activity_type.to_lowercase().contains("illness")
+                || entry.activity_type.to_lowercase() == "l104"
             {
-                // Vacation or illness without hours specified - count as 8 hours
+                // Vacation, illness, or L104 without hours specified - count as 8 hours
                 daily_total += 8.0;
             }
         }

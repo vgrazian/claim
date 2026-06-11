@@ -1,8 +1,9 @@
 use crate::cache::EntryCache;
 use crate::monday::{Item, MondayClient, MondayUser};
 use crate::{
-    calculate_working_dates, get_year_group_id, map_activity_value_to_name, normalize_date,
-    truncate_string, validate_date,
+    calculate_l104_monthly_total, calculate_working_dates, get_year_group_id,
+    map_activity_value_to_name, normalize_date, truncate_string, validate_date,
+    L104_MAX_DAYS_PER_MONTH, L104_MAX_HOURS_PER_MONTH,
 };
 use anyhow::Result;
 use chrono::prelude::*;
@@ -442,6 +443,73 @@ pub async fn handle_query_command(
     // Calculate final metrics
     metrics.duration_ms = query_start.elapsed().as_millis() as u64;
 
+    // Show L104 monthly summary if query spans a full calendar month
+    if let Some(query_date) = start_date {
+        if target_days > 1 {
+            // Check if the date range spans a full calendar month
+            let end_date = date_range.last().copied().unwrap_or(query_date);
+            let spans_full_month = query_date.day() == 1
+                && end_date.day()
+                    >= chrono::NaiveDate::from_ymd_opt(end_date.year(), end_date.month(), 1)
+                        .unwrap()
+                        .signed_duration_since(
+                            chrono::NaiveDate::from_ymd_opt(
+                                end_date.year(),
+                                end_date.month() % 12 + 1,
+                                1,
+                            )
+                            .unwrap_or_else(|| {
+                                chrono::NaiveDate::from_ymd_opt(end_date.year() + 1, 1, 1).unwrap()
+                            }),
+                        )
+                        .num_days()
+                        .abs() as u32;
+
+            if spans_full_month || (query_date.month() == end_date.month()) {
+                // Extract L104 entries from filtered items
+                let mut l104_entries = Vec::new();
+                for item in &filtered_items {
+                    let customer = extract_column_value(item, CUSTOMER_COLUMN_ID);
+                    let work_item = extract_column_value(item, WORK_ITEM_COLUMN_ID);
+                    let activity_type = extract_status_value(item);
+                    let hours = extract_hours_value(item);
+
+                    if let Some(date) = extract_date_from_item(item) {
+                        l104_entries.push((customer, work_item, date, activity_type, hours));
+                    }
+                }
+
+                let year = query_date.year();
+                let month = query_date.month();
+                let (total_hours, total_days, entry_count) =
+                    calculate_l104_monthly_total(&l104_entries, year, month);
+
+                if entry_count > 0 {
+                    println!("\n📊 L104 Summary for {}-{:02}:", year, month);
+                    println!(
+                        "  Total: {:.1} hours ({:.1} days) from {} entries",
+                        total_hours, total_days, entry_count
+                    );
+                    println!(
+                        "  Limit: {} hours ({} days)",
+                        L104_MAX_HOURS_PER_MONTH, L104_MAX_DAYS_PER_MONTH
+                    );
+                    println!(
+                        "  Remaining: {:.1} hours ({:.1} days)",
+                        L104_MAX_HOURS_PER_MONTH - total_hours,
+                        L104_MAX_DAYS_PER_MONTH - total_days
+                    );
+
+                    if total_hours > L104_MAX_HOURS_PER_MONTH {
+                        println!("  ⚠️  WARNING: Monthly limit exceeded!");
+                    } else if total_hours == L104_MAX_HOURS_PER_MONTH {
+                        println!("  ⚠️  At monthly limit");
+                    }
+                }
+            }
+        }
+    }
+
     // Print performance metrics
     metrics.print(verbose);
 
@@ -696,6 +764,24 @@ fn extract_status_value(item: &Item) -> String {
         }
     }
     "unknown".to_string()
+}
+
+// Helper function to extract hours value from item
+fn extract_hours_value(item: &Item) -> f64 {
+    for col in &item.column_values {
+        if let Some(col_id) = &col.id {
+            if col_id == "numbers__1" {
+                if let Some(text) = &col.text {
+                    if !text.is_empty() && text != "null" {
+                        if let Ok(hours) = text.parse::<f64>() {
+                            return hours;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    0.0
 }
 
 // Display simplified table for multi-day queries - UPDATED to show comments

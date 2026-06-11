@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- L104 absence type support with automatic monthly limit enforcement
+  - Added L104 as activity type 13 with LightMagenta color coding
+  - Automatic 3-day (24 hours) monthly limit validation
+  - Pre-submission validation when adding L104 entries
+  - Monthly usage summary in query command output
+  - Comprehensive test coverage (9 new tests)
+- **Monthly Summary section in TUI**
+  - Separate "Monthly Summary" section showing vacation, presales, and L104 usage for the entire calendar month
+  - Displays month name and year (e.g., "June 2026")
+  - Tracks vacation days taken in the current month
+  - Tracks presales days worked in the current month
+  - Tracks L104 days with 3-day monthly limit indicator
+  - Color-coded warnings: Red when at limit (≥3.0 days), Yellow when approaching (≥2.5 days)
+  - Weekly Summary now only shows current week's activity distribution
+  - Automatically loads full month data when navigating between weeks
 - PRESALES quick-add option as option 0 in TUI quick selection list
   - Hardcoded entry: Customer "PRESALES", Work Item "M.34212", Hours "8"
   - Displayed in green with bold styling for easy identification

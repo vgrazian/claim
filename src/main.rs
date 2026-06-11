@@ -65,7 +65,7 @@ enum Commands {
         #[arg(short = 'D', long = "date")]
         date: Option<String>,
 
-        /// Activity type (vacation, billable, holding, education, work_reduction, tbd, holiday, presales, illness, paid_not_worked, intellectual_capital, business_development, overhead)
+        /// Activity type (vacation, billable, holding, education, work_reduction, tbd, holiday, presales, illness, paid_not_worked, intellectual_capital, business_development, overhead, l104)
         #[arg(short = 't', long = "type")]
         activity_type: Option<String>,
 
@@ -283,8 +283,10 @@ async fn run(cli: Cli) -> Result<()> {
 
 // Re-export utility functions for use in other modules
 pub use utils::{
-    calculate_working_dates, get_year_group_id, map_activity_type_to_value,
-    map_activity_value_to_name, mask_api_key, normalize_date, truncate_string, validate_date,
+    calculate_l104_monthly_total, calculate_working_dates, get_year_group_id,
+    map_activity_type_to_value, map_activity_value_to_name, mask_api_key, normalize_date,
+    truncate_string, validate_date, validate_l104_monthly_limit, L104_MAX_DAYS_PER_MONTH,
+    L104_MAX_HOURS_PER_MONTH,
 };
 
 #[cfg(test)]

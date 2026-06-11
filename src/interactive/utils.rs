@@ -14,6 +14,7 @@ pub fn get_activity_color(activity_type: &str) -> Color {
         "holiday" => Color::Magenta,
         "education" => Color::LightBlue,
         "holding" => Color::Gray,
+        "l104" => Color::LightMagenta,
         _ => Color::White,
     }
 }

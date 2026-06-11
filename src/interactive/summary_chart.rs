@@ -1,5 +1,6 @@
 //! Summary chart component for displaying activity type distribution
 
+use chrono::Datelike;
 use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
@@ -12,36 +13,42 @@ use std::collections::HashMap;
 use super::app::App;
 use super::utils::{format_hours, get_activity_color};
 
-/// Render the summary chart
-pub fn render(f: &mut Frame, app: &App, area: Rect) {
-    // Calculate activity type distribution
+/// Render the weekly summary chart
+pub fn render_weekly(f: &mut Frame, app: &App, area: Rect) {
+    let current_week_start = app.current_week_start;
+
+    // ===== WEEKLY SUMMARY CALCULATION =====
     let mut activity_totals: HashMap<String, f64> = HashMap::new();
     let mut total_hours = 0.0;
-    // Track which days have entries
     let mut days_with_entries = std::collections::HashSet::new();
 
+    // Only count entries from the current week (Monday-Friday)
     for entry in &app.claims {
-        days_with_entries.insert(entry.date);
+        // Check if entry is in current week
+        let days_from_week_start = (entry.date - current_week_start).num_days();
+        if days_from_week_start >= 0 && days_from_week_start < 5 {
+            days_with_entries.insert(entry.date);
 
-        // Handle vacation/illness without hours as 8 hours
-        let hours = if entry.hours > 0.0 {
-            entry.hours
-        } else if entry.activity_type.to_lowercase().contains("vacation")
-            || entry.activity_type.to_lowercase().contains("illness")
-        {
-            8.0
-        } else {
-            entry.hours
-        };
+            // Handle vacation/illness/l104 without hours as 8 hours
+            let hours = if entry.hours > 0.0 {
+                entry.hours
+            } else if entry.activity_type.to_lowercase().contains("vacation")
+                || entry.activity_type.to_lowercase().contains("illness")
+                || entry.activity_type.to_lowercase() == "l104"
+            {
+                8.0
+            } else {
+                entry.hours
+            };
 
-        *activity_totals
-            .entry(entry.activity_type.clone())
-            .or_insert(0.0) += hours;
-        total_hours += hours;
+            *activity_totals
+                .entry(entry.activity_type.clone())
+                .or_insert(0.0) += hours;
+            total_hours += hours;
+        }
     }
 
-    // Calculate total with blank days as 8 hours
-    let current_week_start = app.current_week_start;
+    // Calculate blank days in the week
     let mut blank_days = 0;
     for i in 0..5 {
         let date = current_week_start + chrono::Duration::days(i);
@@ -144,6 +151,129 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     );
 
     f.render_widget(paragraph, area);
+}
+
+/// Render the monthly summary chart
+pub fn render_monthly(f: &mut Frame, app: &App, area: Rect) {
+    let current_week_start = app.current_week_start;
+    let current_month = current_week_start.month();
+    let current_year = current_week_start.year();
+
+    let mut lines = Vec::new();
+
+    let month_name = match current_month {
+        1 => "January",
+        2 => "February",
+        3 => "March",
+        4 => "April",
+        5 => "May",
+        6 => "June",
+        7 => "July",
+        8 => "August",
+        9 => "September",
+        10 => "October",
+        11 => "November",
+        12 => "December",
+        _ => "Unknown",
+    };
+
+    lines.push(Line::from(vec![Span::styled(
+        format!("{} {}", month_name, current_year),
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )]));
+    lines.push(Line::from(""));
+
+    // Calculate vacation, presales, and L104 for the entire month
+    let mut vacation_days = 0.0;
+    let mut presales_days = 0.0;
+    let mut l104_days = 0.0;
+
+    for entry in &app.monthly_claims {
+        if entry.date.year() == current_year && entry.date.month() == current_month {
+            let days = if entry.hours > 0.0 {
+                entry.hours / 8.0
+            } else {
+                1.0 // Treat 0 hours as 1 full day
+            };
+
+            let activity_lower = entry.activity_type.to_lowercase();
+            if activity_lower.contains("vacation") {
+                vacation_days += days;
+            } else if activity_lower.contains("presales") {
+                presales_days += days;
+            } else if activity_lower == "l104" {
+                l104_days += days;
+            }
+        }
+    }
+
+    // Show vacation tracking
+    if vacation_days > 0.0 {
+        lines.push(Line::from(vec![
+            Span::styled("Vacation: ", Style::default().fg(Color::White)),
+            Span::styled(
+                format!("{:.1} days", vacation_days),
+                Style::default().fg(Color::Green),
+            ),
+        ]));
+    }
+
+    // Show presales tracking
+    if presales_days > 0.0 {
+        lines.push(Line::from(vec![
+            Span::styled("Presales: ", Style::default().fg(Color::White)),
+            Span::styled(
+                format!("{:.1} days", presales_days),
+                Style::default().fg(Color::Blue),
+            ),
+        ]));
+    }
+
+    // Show L104 tracking with limit
+    if l104_days > 0.0 {
+        let l104_color = if l104_days >= 3.0 {
+            Color::Red
+        } else if l104_days >= 2.5 {
+            Color::Yellow
+        } else {
+            Color::LightMagenta
+        };
+
+        let l104_text = if l104_days >= 3.0 {
+            format!("{:.1} / 3.0 days ⚠️ (limit reached)", l104_days)
+        } else {
+            format!("{:.1} / 3.0 days", l104_days)
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled("L104: ", Style::default().fg(Color::White)),
+            Span::styled(l104_text, Style::default().fg(l104_color)),
+        ]));
+    }
+
+    // If no vacation, presales, or L104 entries this month
+    if vacation_days == 0.0 && presales_days == 0.0 && l104_days == 0.0 {
+        lines.push(Line::from(vec![Span::styled(
+            "No vacation, presales, or L104 entries this month",
+            Style::default().fg(Color::Gray),
+        )]));
+    }
+
+    let paragraph = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Monthly Summary ")
+            .border_style(Style::default().fg(Color::Cyan)),
+    );
+
+    f.render_widget(paragraph, area);
+}
+
+/// Legacy render function for backward compatibility
+pub fn render(f: &mut Frame, app: &App, area: Rect) {
+    render_weekly(f, app, area);
 }
 
 // Made with Bob

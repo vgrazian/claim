@@ -34,6 +34,7 @@ pub fn get_all_activity_types() -> Vec<ActivityType> {
         ActivityType::new(10, "intellectual_capital", "Intellectual Capital"),
         ActivityType::new(11, "business_development", "Business Development"),
         ActivityType::new(12, "overhead", "Overhead"),
+        ActivityType::new(13, "l104", "L104"),
     ]
 }
 
@@ -53,6 +54,7 @@ pub fn get_activity_type_by_number(number: u8) -> Option<&'static str> {
         10 => Some("intellectual_capital"),
         11 => Some("business_development"),
         12 => Some("overhead"),
+        13 => Some("l104"),
         _ => None,
     }
 }

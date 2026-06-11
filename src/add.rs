@@ -1,8 +1,9 @@
 use crate::cache::EntryCache;
 use crate::monday::{MondayClient, MondayUser};
 use crate::{
-    calculate_working_dates, get_year_group_id, map_activity_type_to_value, normalize_date,
-    validate_date,
+    calculate_l104_monthly_total, calculate_working_dates, get_year_group_id,
+    map_activity_type_to_value, normalize_date, validate_date, validate_l104_monthly_limit,
+    L104_MAX_DAYS_PER_MONTH, L104_MAX_HOURS_PER_MONTH,
 };
 use anyhow::{anyhow, Result};
 use chrono::prelude::*;
@@ -147,7 +148,7 @@ pub async fn handle_add_command(
     // Automatically set work item based on activity type if not provided
     let final_work_item = if final_work_item.is_none() {
         match activity_type_str.as_str() {
-            "vacation" | "illness" | "holiday" | "work_reduction" => {
+            "vacation" | "illness" | "holiday" | "work_reduction" | "l104" => {
                 if verbose {
                     println!(
                         "Auto-setting work item to M.00556 for activity type: {}",
@@ -174,6 +175,91 @@ pub async fn handle_add_command(
     let start_date = chrono::NaiveDate::parse_from_str(&final_date, "%Y-%m-%d")?;
     let target_days = days_value as i64;
     let actual_dates = calculate_working_dates(start_date, target_days);
+
+    // Validate L104 monthly limit if activity type is L104
+    if activity_type_str.to_lowercase() == "l104" {
+        if verbose {
+            println!("\n🔍 Checking L104 monthly limit...");
+        }
+
+        // Query existing entries for the month to check L104 usage
+        let board = client.get_board_with_groups("6500270039", verbose).await?;
+        let group_id = get_year_group_id(&board, current_year);
+
+        // Get all items for the user in the current year
+        let all_items = client
+            .query_items_with_filters("6500270039", &group_id, user.id, &[], 500, verbose)
+            .await?;
+
+        // Extract entries with dates and activity types
+        let mut existing_entries = Vec::new();
+        for item in &all_items {
+            let customer = extract_customer_from_item(item);
+            let work_item = extract_work_item_from_item(item);
+            let date = extract_date_from_item(item);
+            let activity_type = extract_activity_type_from_item(item);
+            let hours = extract_hours_from_item(item);
+
+            if let Some(d) = date {
+                existing_entries.push((customer, work_item, d, activity_type, hours));
+            }
+        }
+
+        // Check each date we're trying to add
+        let hours_per_entry = final_hours.unwrap_or(0.0);
+        for date in &actual_dates {
+            if let Err(e) = validate_l104_monthly_limit(&existing_entries, *date, hours_per_entry) {
+                return Err(anyhow!(
+                    "❌ Cannot add L104 entry for {}: {}",
+                    date.format("%Y-%m-%d"),
+                    e
+                ));
+            }
+        }
+
+        // Calculate and display current L104 usage for the month
+        let year = start_date.year();
+        let month = start_date.month();
+        let (current_hours, current_days, entry_count) =
+            calculate_l104_monthly_total(&existing_entries, year, month);
+
+        let hours_to_add = if hours_per_entry > 0.0 {
+            hours_per_entry * actual_dates.len() as f64
+        } else {
+            8.0 * actual_dates.len() as f64
+        };
+        let new_total_hours = current_hours + hours_to_add;
+        let new_total_days = new_total_hours / 8.0;
+
+        println!("\n📊 L104 Usage for {}-{:02}:", year, month);
+        println!(
+            "  Current: {:.1} hours ({:.1} days) from {} entries",
+            current_hours, current_days, entry_count
+        );
+        println!(
+            "  Adding: {:.1} hours ({:.1} days) from {} entries",
+            hours_to_add,
+            hours_to_add / 8.0,
+            actual_dates.len()
+        );
+        println!(
+            "  New Total: {:.1} hours ({:.1} days)",
+            new_total_hours, new_total_days
+        );
+        println!(
+            "  Limit: {} hours ({} days)",
+            L104_MAX_HOURS_PER_MONTH, L104_MAX_DAYS_PER_MONTH
+        );
+        println!(
+            "  Remaining: {:.1} hours ({:.1} days)",
+            L104_MAX_HOURS_PER_MONTH - new_total_hours,
+            L104_MAX_DAYS_PER_MONTH - new_total_days
+        );
+
+        if verbose {
+            println!("✅ L104 monthly limit check passed");
+        }
+    }
 
     println!("\n=== Adding Claim for User ===");
     println!(
@@ -697,6 +783,7 @@ fn prompt_for_claim_details(
     println!("10 - intellectual_capital");
     println!("11 - business_development");
     println!("12 - overhead");
+    println!("13 - l104");
     print!("\nActivity type (enter number or name, optional - default: billable): ");
     io::stdout().flush()?;
     let mut activity_type = String::new();
@@ -722,6 +809,7 @@ fn prompt_for_claim_details(
                 10 => Some("intellectual_capital".to_string()),
                 11 => Some("business_development".to_string()),
                 12 => Some("overhead".to_string()),
+                13 => Some("l104".to_string()),
                 _ => {
                     println!("Invalid activity type number. Using default 'billable'.");
                     Some("billable".to_string())
@@ -744,12 +832,13 @@ fn prompt_for_claim_details(
                 "intellectual_capital" | "10" => Some("intellectual_capital".to_string()),
                 "business_development" | "11" => Some("business_development".to_string()),
                 "overhead" | "12" => Some("overhead".to_string()),
+                "l104" | "13" => Some("l104".to_string()),
                 _ => {
                     println!(
                         "❌ Error: Unknown activity type '{}'. Please use a valid number or name.",
                         activity_type
                     );
-                    println!("Valid options: vacation, billable, holding, education, work_reduction, tbd, holiday, presales, illness, paid_not_worked, intellectual_capital, business_development, overhead");
+                    println!("Valid options: vacation, billable, holding, education, work_reduction, tbd, holiday, presales, illness, paid_not_worked, intellectual_capital, business_development, overhead, l104");
                     return Err(anyhow!("Unknown activity type: {}", activity_type));
                 }
             }
@@ -917,6 +1006,40 @@ fn extract_date_from_item(item: &crate::monday::Item) -> Option<NaiveDate> {
     None
 }
 
+// Helper function to extract activity type from item
+fn extract_activity_type_from_item(item: &crate::monday::Item) -> String {
+    for col in &item.column_values {
+        if let Some(id) = &col.id {
+            if id == "status" {
+                if let Some(text) = &col.text {
+                    if text != "null" && !text.is_empty() {
+                        return text.to_lowercase();
+                    }
+                }
+            }
+        }
+    }
+    String::from("billable") // Default to billable if not found
+}
+
+// Helper function to extract hours from item
+fn extract_hours_from_item(item: &crate::monday::Item) -> f64 {
+    for col in &item.column_values {
+        if let Some(id) = &col.id {
+            if id == "numbers__1" {
+                if let Some(text) = &col.text {
+                    if text != "null" && !text.is_empty() {
+                        if let Ok(hours) = text.parse::<f64>() {
+                            return hours;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    0.0 // Default to 0 if not found
+}
+
 // Helper function to prompt with preselected customer and work item
 #[allow(clippy::type_complexity)]
 fn prompt_with_preselected_entry(
@@ -966,6 +1089,7 @@ fn prompt_with_preselected_entry(
     println!("10 - intellectual_capital");
     println!("11 - business_development");
     println!("12 - overhead");
+    println!("13 - l104");
     print!("\nActivity type (enter number or name, optional - default: billable): ");
     io::stdout().flush()?;
     let mut activity_type = String::new();
@@ -989,6 +1113,7 @@ fn prompt_with_preselected_entry(
             10 => Some("intellectual_capital".to_string()),
             11 => Some("business_development".to_string()),
             12 => Some("overhead".to_string()),
+            13 => Some("l104".to_string()),
             _ => {
                 println!("Invalid activity type number. Using default 'billable'.");
                 Some("billable".to_string())
@@ -1010,6 +1135,7 @@ fn prompt_with_preselected_entry(
             "intellectual_capital" | "10" => Some("intellectual_capital".to_string()),
             "business_development" | "11" => Some("business_development".to_string()),
             "overhead" | "12" => Some("overhead".to_string()),
+            "l104" | "13" => Some("l104".to_string()),
             _ => {
                 println!(
                     "❌ Error: Unknown activity type '{}'. Please use a valid number or name.",
@@ -1236,6 +1362,7 @@ mod tests {
         assert_eq!(map_activity_type_to_value("billable"), 1);
         assert_eq!(map_activity_type_to_value("vacation"), 0);
         assert_eq!(map_activity_type_to_value("holding"), 2);
+        assert_eq!(map_activity_type_to_value("l104"), 13);
         assert_eq!(map_activity_type_to_value("unknown"), 1); // default
     }
 

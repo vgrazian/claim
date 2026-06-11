@@ -145,6 +145,7 @@ fn get_activity_color(activity_type: &str) -> Style {
         "work_reduction" => Color::LightYellow,
         "intellectual_capital" => Color::LightCyan,
         "business_development" => Color::LightGreen,
+        "l104" => Color::LightMagenta,
         _ => Color::White,
     };
     Style::default().fg(color).add_modifier(Modifier::BOLD)

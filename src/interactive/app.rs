@@ -89,8 +89,10 @@ pub struct App {
     pub selected_day: Option<NaiveDate>,
     /// Index of selected entry on the selected day
     pub selected_entry_index: Option<usize>,
-    /// All loaded claims
+    /// All loaded claims (current week)
     pub claims: Vec<ClaimEntry>,
+    /// All loaded claims for current month (for monthly summary)
+    pub monthly_claims: Vec<ClaimEntry>,
     /// Entry cache for autocomplete
     pub cache: EntryCache,
     /// Current application mode
@@ -141,6 +143,7 @@ impl App {
             selected_day: Some(today),
             selected_entry_index: None,
             claims: Vec::new(),
+            monthly_claims: Vec::new(),
             cache,
             mode: AppMode::Normal,
             messages: vec![Message::new(
@@ -165,6 +168,7 @@ impl App {
 
         // Load initial data
         app.load_week_data().await?;
+        app.load_month_data().await?;
 
         Ok(app)
     }
@@ -275,6 +279,53 @@ impl App {
                 self.current_week_start.format("%b %d, %Y")
             ),
         ));
+
+        Ok(())
+    }
+
+    /// Load data for the current month
+    pub async fn load_month_data(&mut self) -> Result<()> {
+        let board_id = "6500270039";
+        let current_year = utils::get_current_year().to_string();
+
+        // Get the board and group ID
+        let board = self.client.get_board_with_groups(board_id, false).await?;
+        let group_id = utils::get_year_group_id(&board, &current_year);
+
+        // Calculate date range for the entire month
+        let current_month = self.current_week_start.month();
+        let current_year_num = self.current_week_start.year();
+
+        // Get first and last day of the month
+        let first_day = NaiveDate::from_ymd_opt(current_year_num, current_month, 1)
+            .ok_or_else(|| anyhow::anyhow!("Invalid date"))?;
+
+        let last_day = if current_month == 12 {
+            NaiveDate::from_ymd_opt(current_year_num + 1, 1, 1)
+                .ok_or_else(|| anyhow::anyhow!("Invalid date"))?
+                - chrono::Duration::days(1)
+        } else {
+            NaiveDate::from_ymd_opt(current_year_num, current_month + 1, 1)
+                .ok_or_else(|| anyhow::anyhow!("Invalid date"))?
+                - chrono::Duration::days(1)
+        };
+
+        // Generate all dates in the month
+        let mut dates = Vec::new();
+        let mut current_date = first_day;
+        while current_date <= last_day {
+            dates.push(current_date.format("%Y-%m-%d").to_string());
+            current_date = current_date + chrono::Duration::days(1);
+        }
+
+        // Query items for the month
+        let items = self
+            .client
+            .query_items_with_filters(board_id, &group_id, self.user.id, &dates, 500, false)
+            .await?;
+
+        // Convert items to ClaimEntry
+        self.monthly_claims = items.iter().filter_map(ClaimEntry::from_item).collect();
 
         Ok(())
     }
@@ -1246,18 +1297,38 @@ impl App {
 
     /// Navigate to previous week
     async fn previous_week(&mut self) -> Result<()> {
+        let old_month = self.current_week_start.month();
         self.current_week_start -= chrono::Duration::days(7);
+        let new_month = self.current_week_start.month();
+
         self.selected_day = Some(self.current_week_start);
         self.selected_entry_index = None;
-        self.load_week_data().await
+        self.load_week_data().await?;
+
+        // Reload monthly data if month changed
+        if old_month != new_month {
+            self.load_month_data().await?;
+        }
+
+        Ok(())
     }
 
     /// Navigate to next week
     async fn next_week(&mut self) -> Result<()> {
+        let old_month = self.current_week_start.month();
         self.current_week_start += chrono::Duration::days(7);
+        let new_month = self.current_week_start.month();
+
         self.selected_day = Some(self.current_week_start);
         self.selected_entry_index = None;
-        self.load_week_data().await
+        self.load_week_data().await?;
+
+        // Reload monthly data if month changed
+        if old_month != new_month {
+            self.load_month_data().await?;
+        }
+
+        Ok(())
     }
 
     /// Select a specific day of the week (0 = Monday, 4 = Friday)
