@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- TUI now shows newly added or edited entries immediately without needing to exit and re-enter; entries are inserted/updated in local state optimistically before the API refresh completes
+- Comment field is now correctly saved and reloaded: the extraction logic now reads from column `text2__1` (matching the write path) with a fallback to `long_text` for backward compatibility
+
+
 ### Added
 - L104 absence type support with automatic monthly limit enforcement
   - Added L104 as activity type 13 with LightMagenta color coding

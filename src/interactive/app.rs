@@ -847,7 +847,24 @@ impl App {
                                             MessageType::Success,
                                             "Entry added successfully".to_string(),
                                         ));
-                                        // Refresh week data to show new entry
+                                        // Optimistically add the entry locally so the UI
+                                        // reflects it immediately, then refresh from API.
+                                        if let Ok(date) = chrono::NaiveDate::parse_from_str(&form_clone.date, "%Y-%m-%d") {
+                                            use crate::utils::map_activity_type_to_value;
+                                            let activity_value = map_activity_type_to_value(&form_clone.activity_type) as i32;
+                                            let activity_type = form_clone.activity_type.clone();
+                                            self.claims.push(ClaimEntry {
+                                                id: String::new(), // placeholder until reload
+                                                date,
+                                                activity_type,
+                                                activity_value,
+                                                customer: form_clone.customer.clone(),
+                                                work_item: form_clone.work_item.clone(),
+                                                hours: form_clone.hours.parse().unwrap_or(0.0),
+                                                comment: if form_clone.comment.is_empty() { None } else { Some(form_clone.comment.clone()) },
+                                            });
+                                        }
+                                        // Refresh week data in background to get the real ID
                                         let _ = self.load_week_data().await;
                                     }
                                     Err(e) => {
@@ -1132,7 +1149,23 @@ impl App {
                                             MessageType::Success,
                                             "Entry updated successfully".to_string(),
                                         ));
-                                        // Refresh week data to show updated entry
+                                        // Optimistically update the entry locally so the UI
+                                        // reflects it immediately, then refresh from API.
+                                        if let Some(ref id) = entry_id_clone {
+                                            if let Some(entry) = self.claims.iter_mut().find(|e| &e.id == id) {
+                                                use crate::utils::map_activity_type_to_value;
+                                                entry.activity_value = map_activity_type_to_value(&form_clone.activity_type) as i32;
+                                                entry.activity_type = form_clone.activity_type.clone();
+                                                entry.customer = form_clone.customer.clone();
+                                                entry.work_item = form_clone.work_item.clone();
+                                                entry.hours = form_clone.hours.parse().unwrap_or(entry.hours);
+                                                entry.comment = if form_clone.comment.is_empty() { None } else { Some(form_clone.comment.clone()) };
+                                                if let Ok(date) = chrono::NaiveDate::parse_from_str(&form_clone.date, "%Y-%m-%d") {
+                                                    entry.date = date;
+                                                }
+                                            }
+                                        }
+                                        // Refresh week data in background to get consistent state
                                         let _ = self.load_week_data().await;
                                     }
                                     Err(e) => {

@@ -75,9 +75,12 @@ pub fn extract_hours_from_item(item: &Item) -> f64 {
 
 /// Extract comment from a Monday.com item
 pub fn extract_comment_from_item(item: &Item) -> Option<String> {
+    // Comments are stored in "text2__1"; fall back to "long_text" for older entries
     item.column_values
         .iter()
-        .find(|cv| cv.id.as_deref() == Some("long_text"))
+        .find(|cv| {
+            cv.id.as_deref() == Some("text2__1") || cv.id.as_deref() == Some("long_text")
+        })
         .and_then(|cv| cv.text.clone())
         .filter(|text| !text.is_empty())
 }
