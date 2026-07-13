@@ -1621,10 +1621,8 @@ impl App {
             column_values["text8__1"] = json!(form.work_item);
         }
 
-        // Set comment
-        if !form.comment.is_empty() {
-            column_values["text2__1"] = json!(form.comment);
-        }
+        // Set comment - always send the value so clearing it during edit takes effect
+        column_values["text2__1"] = json!(form.comment);
 
         // Set hours
         column_values["numbers__1"] = json!(form.hours.to_string());

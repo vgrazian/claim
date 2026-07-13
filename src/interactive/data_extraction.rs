@@ -82,7 +82,7 @@ pub fn extract_comment_from_item(item: &Item) -> Option<String> {
             cv.id.as_deref() == Some("text2__1") || cv.id.as_deref() == Some("long_text")
         })
         .and_then(|cv| cv.text.clone())
-        .filter(|text| !text.is_empty())
+        .filter(|text| !text.is_empty() && text != "null")
 }
 
 #[cfg(test)]
@@ -160,6 +160,44 @@ mod tests {
         };
 
         assert_eq!(extract_comment_from_item(&item), None);
+    }
+
+    #[test]
+    fn test_extract_comment_null_string_returns_none() {
+        use crate::monday::ColumnValue;
+
+        // Monday.com sometimes returns the literal string "null" for empty text columns
+        let item = Item {
+            id: Some("123".to_string()),
+            name: Some("Test".to_string()),
+            column_values: vec![ColumnValue {
+                id: Some("text2__1".to_string()),
+                value: None,
+                text: Some("null".to_string()),
+            }],
+        };
+
+        assert_eq!(extract_comment_from_item(&item), None);
+    }
+
+    #[test]
+    fn test_extract_comment_with_value() {
+        use crate::monday::ColumnValue;
+
+        let item = Item {
+            id: Some("123".to_string()),
+            name: Some("Test".to_string()),
+            column_values: vec![ColumnValue {
+                id: Some("text2__1".to_string()),
+                value: None,
+                text: Some("my comment".to_string()),
+            }],
+        };
+
+        assert_eq!(
+            extract_comment_from_item(&item),
+            Some("my comment".to_string())
+        );
     }
 }
 

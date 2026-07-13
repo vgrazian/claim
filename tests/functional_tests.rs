@@ -189,10 +189,11 @@ mod functional_tests {
         use chrono::prelude::*;
         let today = Local::now().format("%Y-%m-%d").to_string();
 
-        // Query for test entries using work item filter
-        match run_claim_command(&["query", "-D", &today, "-d", "1", "-w", "DELETE.ME"]) {
+        // Query for test entries using work item filter with verbose flag so output
+        // contains "(ID: xxx)" format that extract_entry_id can parse.
+        match run_claim_command(&["query", "-v", "-D", &today, "-d", "1", "-w", "DELETE.ME"]) {
             Ok((stdout, _)) => {
-                // Extract IDs from output
+                // Extract IDs from verbose output lines like: "1. Name (ID: 12345)"
                 let orphaned_ids: Vec<String> = stdout
                     .lines()
                     .filter_map(|line| {

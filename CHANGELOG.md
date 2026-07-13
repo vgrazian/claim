@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - TUI now shows newly added or edited entries immediately without needing to exit and re-enter; entries are inserted/updated in local state optimistically before the API refresh completes
 - Comment field is now correctly saved and reloaded: the extraction logic now reads from column `text2__1` (matching the write path) with a fallback to `long_text` for backward compatibility
+- Functional tests now clean up created entries reliably: orphan-cleanup query uses the verbose flag (`-v`) so the `(ID: xxx)` pattern appears in output and can be parsed by `extract_entry_id`
+- Comment extraction no longer returns the literal string `"null"` (which Monday.com emits for empty text columns) as a comment value; it is now treated as absent
+- Editing an entry in the TUI and clearing the comment field now correctly clears it on Monday.com (the comment column value is always included in the update mutation)
 
 
 ### Added
