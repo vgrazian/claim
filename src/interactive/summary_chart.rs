@@ -10,6 +10,8 @@ use ratatui::{
 };
 use std::collections::HashMap;
 
+use crate::cache::PRESALES_OPPORTUNITY_HOURS_LIMIT;
+
 use super::app::App;
 use super::utils::{format_hours, get_activity_color};
 
@@ -115,7 +117,7 @@ pub fn render_weekly(f: &mut Frame, app: &App, area: Rect) {
         };
 
         let total_text = if total_hours_with_blanks > 40.0 {
-            format!("{} ⚠️ (exceeds 40h)", format_hours(total_hours_with_blanks))
+            format!("{} WARNING (exceeds 40h)", format_hours(total_hours_with_blanks))
         } else {
             format_hours(total_hours_with_blanks)
         };
@@ -153,7 +155,7 @@ pub fn render_weekly(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(paragraph, area);
 }
 
-/// Render the monthly summary chart
+/// Render the summary chart
 pub fn render_monthly(f: &mut Frame, app: &App, area: Rect) {
     let current_week_start = app.current_week_start;
     let current_month = current_week_start.month();
@@ -178,16 +180,17 @@ pub fn render_monthly(f: &mut Frame, app: &App, area: Rect) {
     };
 
     lines.push(Line::from(vec![Span::styled(
-        format!("{} {}", month_name, current_year),
+        "Month",
         Style::default()
             .fg(Color::Cyan)
             .add_modifier(Modifier::BOLD),
     )]));
-    lines.push(Line::from(""));
+    lines.push(Line::from(vec![Span::styled(
+        format!("{} {}", month_name, current_year),
+        Style::default().fg(Color::Gray),
+    )]));
 
-    // Calculate vacation, presales, and L104 for the entire month
     let mut vacation_days = 0.0;
-    let mut presales_days = 0.0;
     let mut l104_days = 0.0;
 
     for entry in &app.monthly_claims {
@@ -195,21 +198,18 @@ pub fn render_monthly(f: &mut Frame, app: &App, area: Rect) {
             let days = if entry.hours > 0.0 {
                 entry.hours / 8.0
             } else {
-                1.0 // Treat 0 hours as 1 full day
+                1.0
             };
 
             let activity_lower = entry.activity_type.to_lowercase();
             if activity_lower.contains("vacation") {
                 vacation_days += days;
-            } else if activity_lower.contains("presales") {
-                presales_days += days;
             } else if activity_lower == "l104" {
                 l104_days += days;
             }
         }
     }
 
-    // Show vacation tracking
     if vacation_days > 0.0 {
         lines.push(Line::from(vec![
             Span::styled("Vacation: ", Style::default().fg(Color::White)),
@@ -220,18 +220,6 @@ pub fn render_monthly(f: &mut Frame, app: &App, area: Rect) {
         ]));
     }
 
-    // Show presales tracking
-    if presales_days > 0.0 {
-        lines.push(Line::from(vec![
-            Span::styled("Presales: ", Style::default().fg(Color::White)),
-            Span::styled(
-                format!("{:.1} days", presales_days),
-                Style::default().fg(Color::Blue),
-            ),
-        ]));
-    }
-
-    // Show L104 tracking with limit
     if l104_days > 0.0 {
         let l104_color = if l104_days >= 3.0 {
             Color::Red
@@ -242,7 +230,7 @@ pub fn render_monthly(f: &mut Frame, app: &App, area: Rect) {
         };
 
         let l104_text = if l104_days >= 3.0 {
-            format!("{:.1} / 3.0 days ⚠️ (limit reached)", l104_days)
+            format!("{:.1} / 3.0 days (limit reached)", l104_days)
         } else {
             format!("{:.1} / 3.0 days", l104_days)
         };
@@ -253,18 +241,59 @@ pub fn render_monthly(f: &mut Frame, app: &App, area: Rect) {
         ]));
     }
 
-    // If no vacation, presales, or L104 entries this month
-    if vacation_days == 0.0 && presales_days == 0.0 && l104_days == 0.0 {
+    if vacation_days == 0.0 && l104_days == 0.0 {
         lines.push(Line::from(vec![Span::styled(
-            "No vacation, presales, or L104 entries this month",
+            "No vacation or L104 entries this month",
             Style::default().fg(Color::Gray),
         )]));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![Span::styled(
+        "Yearly",
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )]));
+    lines.push(Line::from(vec![Span::styled(
+        format!("{} visible week opportunities", current_year),
+        Style::default().fg(Color::Gray),
+    )]));
+
+    let yearly_opportunities = app.weekly_visible_presales_opportunities();
+    if yearly_opportunities.is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            "No PRESALES M.34212 opportunities in current week",
+            Style::default().fg(Color::Gray),
+        )]));
+    } else {
+        for (code, total_hours) in yearly_opportunities {
+            let color = if total_hours >= PRESALES_OPPORTUNITY_HOURS_LIMIT {
+                Color::Red
+            } else if total_hours >= PRESALES_OPPORTUNITY_HOURS_LIMIT - 4.0 {
+                Color::Yellow
+            } else {
+                Color::Blue
+            };
+            let suffix = if total_hours >= PRESALES_OPPORTUNITY_HOURS_LIMIT {
+                " (24h limit)"
+            } else {
+                ""
+            };
+            lines.push(Line::from(vec![
+                Span::styled(format!("{}: ", code), Style::default().fg(Color::White)),
+                Span::styled(
+                    format!("{}{}", format_hours(total_hours), suffix),
+                    Style::default().fg(color),
+                ),
+            ]));
+        }
     }
 
     let paragraph = Paragraph::new(lines).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(" Monthly Summary ")
+            .title(" Summary ")
             .border_style(Style::default().fg(Color::Cyan)),
     );
 

@@ -2,9 +2,12 @@
 
 use anyhow::Result;
 use chrono::{Datelike, Local, NaiveDate};
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::cache::EntryCache;
+use crate::cache::{
+    calculate_presales_yearly_usage, is_presales_opportunity_entry, is_valid_opportunity_code,
+    EntryCache, PresalesOpportunityUsage, PRESALES_OPPORTUNITY_HOURS_LIMIT,
+};
 use crate::monday::{Item, MondayClient, MondayUser};
 use crate::utils;
 
@@ -26,8 +29,10 @@ pub enum AppMode {
     DeleteEntry,
     /// Help screen
     Help,
-    /// Report view
+    /// Weekly report view
     Report,
+    /// Yearly presales report view
+    PresalesReport,
 }
 
 /// Claim entry data structure
@@ -93,8 +98,10 @@ pub struct App {
     pub claims: Vec<ClaimEntry>,
     /// All loaded claims for current month (for monthly summary)
     pub monthly_claims: Vec<ClaimEntry>,
-    /// Entry cache for autocomplete
+    /// Entry cache for autocomplete and yearly presales summaries
     pub cache: EntryCache,
+    /// Cached yearly presales usage for the selected year context
+    pub presales_yearly_usage: Vec<PresalesOpportunityUsage>,
     /// Current application mode
     pub mode: AppMode,
     /// Messages to display
@@ -122,6 +129,8 @@ pub struct App {
     pub selected_report_row: Option<usize>,
     /// Marked work items from the report (stored in memory until cleared)
     pub marked_report_items: Vec<String>,
+    /// Selected row in the presales yearly report
+    pub selected_presales_row: Option<usize>,
 }
 
 impl App {
@@ -145,6 +154,7 @@ impl App {
             claims: Vec::new(),
             monthly_claims: Vec::new(),
             cache,
+            presales_yearly_usage: Vec::new(),
             mode: AppMode::Normal,
             messages: vec![Message::new(
                 MessageType::Info,
@@ -161,6 +171,7 @@ impl App {
             week_start: current_week_start,
             selected_report_row: None,
             marked_report_items: Vec::new(),
+            selected_presales_row: Some(0),
         };
 
         // Refresh cache on startup (like -r option)
@@ -169,39 +180,65 @@ impl App {
         // Load initial data
         app.load_week_data().await?;
         app.load_month_data().await?;
+        app.load_presales_yearly_usage(false).await?;
 
         Ok(app)
     }
+
+    fn sync_year_context(&mut self) {
+        self.current_year = self.current_week_start.year().to_string();
+    }
+
+    async fn reload_current_context(&mut self, force_presales_refresh: bool) -> Result<()> {
+        self.sync_year_context();
+        self.load_week_data().await?;
+        self.load_month_data().await?;
+        self.load_presales_yearly_usage(force_presales_refresh).await?;
+        Ok(())
+    }
+
+    pub fn presales_report_rows(&self) -> Vec<(String, f64)> {
+        self.presales_yearly_usage
+            .iter()
+            .filter(|usage| usage.year == self.current_week_start.year())
+            .map(|usage| (usage.opportunity_code.clone(), usage.total_hours))
+            .collect()
+    }
+
+    pub fn presales_missing_comment_rows(&self) -> Vec<(chrono::NaiveDate, f64)> {
+        let year = self.current_week_start.year();
+        let mut rows: Vec<(chrono::NaiveDate, f64)> = self
+            .claims
+            .iter()
+            .chain(self.monthly_claims.iter())
+            .filter(|entry| entry.date.year() == year)
+            .filter(|entry| is_presales_opportunity_entry(&entry.customer, &entry.work_item))
+            .filter(|entry| {
+                entry
+                    .comment
+                    .as_ref()
+                    .map(|comment| !is_valid_opportunity_code(comment))
+                    .unwrap_or(true)
+            })
+            .map(|entry| (entry.date, entry.hours))
+            .collect();
+        rows.sort_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then(a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+        });
+        rows.dedup();
+        rows
+    }
+
     /// Refresh cache from Monday.com (like -r option)
     pub async fn refresh_cache(&mut self) -> Result<()> {
         self.loading = true;
-        self.loading_message = "Refreshing cache from last 4 weeks...".to_string();
+        self.loading_message = "Refreshing cache from Monday.com...".to_string();
 
-        let board_id = "6500270039";
-        let current_year = utils::get_current_year().to_string();
+        let all_items = self.load_all_items_for_year(self.current_week_start.year()).await?;
 
-        // Query last 4 weeks (28 days)
         let today = Local::now().naive_local().date();
         let start_date = today - chrono::Duration::days(28);
-
-        // Get the group ID for the current year
-        let board = self.client.get_board_with_groups(board_id, false).await?;
-        let group_id = utils::get_year_group_id(&board, &current_year);
-
-        // Query all items for the user in the current year
-        let all_items = self
-            .client
-            .query_items_with_filters(
-                board_id,
-                &group_id,
-                self.user.id,
-                &[], // Empty date filter - get all items for the user
-                500,
-                false,
-            )
-            .await?;
-
-        // Extract customer and work item pairs from items, filtering by date range and billable only
         let mut entries = Vec::new();
         for item in &all_items {
             let customer = extract_customer_from_item(item);
@@ -209,10 +246,8 @@ impl App {
             let date = extract_date_from_item(item);
             let activity_value = extract_activity_value_from_item(item);
 
-            // Only include billable entries (activity_value == 1)
             if activity_value == 1 && !customer.is_empty() && !work_item.is_empty() {
                 if let Some(d) = date {
-                    // Only include items within the last 4 weeks
                     if d >= start_date && d <= today {
                         entries.push((customer, work_item, d));
                     }
@@ -221,7 +256,10 @@ impl App {
         }
 
         self.cache.update_from_items(self.user.id, &entries);
+        self.cache
+            .set_presales_usage(self.user.id, calculate_presales_yearly_usage(&all_items, self.current_week_start.year()));
         self.cache.save()?;
+        self.presales_yearly_usage = self.cache.get_presales_usage(self.user.id);
 
         self.loading = false;
         self.messages.push(Message::new(
@@ -235,6 +273,91 @@ impl App {
         Ok(())
     }
 
+    async fn load_all_items_for_year(&self, year: i32) -> Result<Vec<Item>> {
+        let board_id = "6500270039";
+        let board = self.client.get_board_with_groups(board_id, false).await?;
+        let group_id = utils::get_year_group_id(&board, &year.to_string());
+        self.client
+            .query_items_with_filters(board_id, &group_id, self.user.id, &[], 500, false)
+            .await
+    }
+
+    async fn load_presales_yearly_usage(&mut self, force_refresh: bool) -> Result<()> {
+        let year = self.current_week_start.year();
+        if force_refresh || self.cache.is_presales_usage_stale(self.user.id, year, 1) {
+            let items = self.load_all_items_for_year(year).await?;
+            let usage = calculate_presales_yearly_usage(&items, year);
+            self.cache.set_presales_usage(self.user.id, usage.clone());
+            self.cache.save()?;
+            self.presales_yearly_usage = usage;
+        } else {
+            self.presales_yearly_usage = self
+                .cache
+                .get_presales_usage(self.user.id)
+                .into_iter()
+                .filter(|entry| entry.year == year)
+                .collect();
+        }
+        Ok(())
+    }
+
+    pub fn weekly_visible_presales_opportunities(&self) -> Vec<(String, f64)> {
+        let mut codes = std::collections::BTreeSet::new();
+        for entry in &self.claims {
+            if !is_presales_opportunity_entry(&entry.customer, &entry.work_item) {
+                continue;
+            }
+            if let Some(comment) = &entry.comment {
+                if is_valid_opportunity_code(comment) {
+                    codes.insert(comment.clone());
+                }
+            }
+        }
+
+        codes
+            .into_iter()
+            .map(|code| {
+                let total_hours = self
+                    .presales_yearly_usage
+                    .iter()
+                    .find(|usage| {
+                        usage.opportunity_code == code && usage.year == self.current_week_start.year()
+                    })
+                    .map(|usage| usage.total_hours)
+                    .unwrap_or(0.0);
+                (code, total_hours)
+            })
+            .collect()
+    }
+
+    fn presales_limit_warning(&self, form: &FormData) -> Option<String> {
+        if !is_presales_opportunity_entry(&form.customer, &form.work_item) {
+            return None;
+        }
+
+        if !is_valid_opportunity_code(&form.comment) {
+            return None;
+        }
+
+        let total_hours = self
+            .presales_yearly_usage
+            .iter()
+            .find(|usage| {
+                usage.opportunity_code == form.comment && usage.year == self.current_week_start.year()
+            })
+            .map(|usage| usage.total_hours)
+            .unwrap_or(0.0);
+
+        if total_hours >= PRESALES_OPPORTUNITY_HOURS_LIMIT {
+            return Some(format!(
+                "Opportunity {} has {} loaded in {}",
+                form.comment, total_hours, self.current_week_start.year()
+            ));
+        }
+
+        None
+    }
+
     /// Load data for the current week
     pub async fn load_week_data(&mut self) -> Result<()> {
         self.loading = true;
@@ -245,7 +368,7 @@ impl App {
         ));
 
         let board_id = "6500270039";
-        let current_year = utils::get_current_year().to_string();
+        let current_year = self.current_week_start.year().to_string();
 
         // Get the board and group ID
         let board = self.client.get_board_with_groups(board_id, false).await?;
@@ -285,47 +408,15 @@ impl App {
 
     /// Load data for the current month
     pub async fn load_month_data(&mut self) -> Result<()> {
-        let board_id = "6500270039";
-        let current_year = utils::get_current_year().to_string();
-
-        // Get the board and group ID
-        let board = self.client.get_board_with_groups(board_id, false).await?;
-        let group_id = utils::get_year_group_id(&board, &current_year);
-
-        // Calculate date range for the entire month
         let current_month = self.current_week_start.month();
         let current_year_num = self.current_week_start.year();
+        let items = self.load_all_items_for_year(current_year_num).await?;
 
-        // Get first and last day of the month
-        let first_day = NaiveDate::from_ymd_opt(current_year_num, current_month, 1)
-            .ok_or_else(|| anyhow::anyhow!("Invalid date"))?;
-
-        let last_day = if current_month == 12 {
-            NaiveDate::from_ymd_opt(current_year_num + 1, 1, 1)
-                .ok_or_else(|| anyhow::anyhow!("Invalid date"))?
-                - chrono::Duration::days(1)
-        } else {
-            NaiveDate::from_ymd_opt(current_year_num, current_month + 1, 1)
-                .ok_or_else(|| anyhow::anyhow!("Invalid date"))?
-                - chrono::Duration::days(1)
-        };
-
-        // Generate all dates in the month
-        let mut dates = Vec::new();
-        let mut current_date = first_day;
-        while current_date <= last_day {
-            dates.push(current_date.format("%Y-%m-%d").to_string());
-            current_date = current_date + chrono::Duration::days(1);
-        }
-
-        // Query items for the month
-        let items = self
-            .client
-            .query_items_with_filters(board_id, &group_id, self.user.id, &dates, 500, false)
-            .await?;
-
-        // Convert items to ClaimEntry
-        self.monthly_claims = items.iter().filter_map(ClaimEntry::from_item).collect();
+        self.monthly_claims = items
+            .iter()
+            .filter_map(ClaimEntry::from_item)
+            .filter(|entry| entry.date.year() == current_year_num && entry.date.month() == current_month)
+            .collect();
 
         Ok(())
     }
@@ -339,6 +430,7 @@ impl App {
             AppMode::EditEntry => self.handle_edit_mode(event).await,
             AppMode::DeleteEntry => self.handle_delete_mode(event).await,
             AppMode::Report => self.handle_report_mode(event).await,
+            AppMode::PresalesReport => self.handle_presales_report_mode(event).await,
         }
     }
 
@@ -409,17 +501,38 @@ impl App {
             // Update data (refresh cache and reload)
             KeyCode::Char('u') | KeyCode::Char('U') => {
                 self.refresh_cache().await?;
-                self.load_week_data().await?;
+                self.reload_current_context(true).await?;
+            }
+            KeyCode::Char('r') | KeyCode::Char('R')
+                if event.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                self.cache.clear_user(self.user.id);
+                self.cache.save()?;
+                self.presales_yearly_usage.clear();
+                self.messages.clear();
+                self.messages.push(Message::new(
+                    MessageType::Success,
+                    "Local cache reset".to_string(),
+                ));
             }
             // Show report view
             KeyCode::Char('p') | KeyCode::Char('P') => {
                 self.mode = AppMode::Report;
                 self.selected_report_row = Some(0); // Start with first row selected
-                                                    // Inform user of report shortcuts (mark rows and copy marked items)
                 self.messages.clear();
                 self.messages.push(Message::new(
                     MessageType::Info,
                     "Report: press 'm' to mark/unmark rows, 'C' to copy marked work items"
+                        .to_string(),
+                ));
+            }
+            KeyCode::Char('o') | KeyCode::Char('O') => {
+                self.mode = AppMode::PresalesReport;
+                self.selected_presales_row = Some(0);
+                self.messages.clear();
+                self.messages.push(Message::new(
+                    MessageType::Info,
+                    "Presales report: yearly opportunity totals and missing-comment entries"
                         .to_string(),
                 ));
             }
@@ -440,7 +553,7 @@ impl App {
                     self.messages.clear();
                     self.messages.push(Message::new(
                         MessageType::Warning,
-                        "⚠️  DELETE CONFIRMATION - Press 'y' to confirm, any other key to cancel"
+                        "DELETE CONFIRMATION - Press 'y' to confirm, any other key to cancel"
                             .to_string(),
                     ));
                 }
@@ -450,7 +563,7 @@ impl App {
                 let today = Local::now().naive_local().date();
                 self.current_week_start = get_week_start(today);
                 self.selected_day = Some(today);
-                self.load_week_data().await?;
+                self.reload_current_context(false).await?;
             }
             _ => {}
         }
@@ -657,6 +770,52 @@ impl App {
         Ok(true)
     }
 
+    async fn handle_presales_report_mode(&mut self, event: KeyEvent) -> Result<bool> {
+        let total_rows = self.presales_report_rows().len() + self.presales_missing_comment_rows().len();
+        match event.code {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('o') | KeyCode::Char('O') => {
+                self.mode = AppMode::Normal;
+                self.selected_presales_row = None;
+            }
+            KeyCode::Tab => {
+                if event.modifiers.contains(crossterm::event::KeyModifiers::SHIFT) {
+                    self.previous_week().await?;
+                } else {
+                    self.next_week().await?;
+                }
+                self.selected_presales_row = Some(0);
+            }
+            KeyCode::BackTab => {
+                self.previous_week().await?;
+                self.selected_presales_row = Some(0);
+            }
+            KeyCode::Up => {
+                if let Some(current) = self.selected_presales_row {
+                    if current > 0 {
+                        self.selected_presales_row = Some(current - 1);
+                    }
+                }
+            }
+            KeyCode::Down => {
+                if let Some(current) = self.selected_presales_row {
+                    if current + 1 < total_rows {
+                        self.selected_presales_row = Some(current + 1);
+                    }
+                }
+            }
+            KeyCode::Home => {
+                self.selected_presales_row = Some(0);
+            }
+            KeyCode::End => {
+                if total_rows > 0 {
+                    self.selected_presales_row = Some(total_rows - 1);
+                }
+            }
+            _ => {}
+        }
+        Ok(true)
+    }
+
     /// Handle events in add mode
     async fn handle_add_mode(&mut self, event: KeyEvent) -> Result<bool> {
         if let Some(form) = &mut self.form_data {
@@ -847,6 +1006,12 @@ impl App {
                                             MessageType::Success,
                                             "Entry added successfully".to_string(),
                                         ));
+                                        if let Some(warning) = form_clone.presales_opportunity_warning() {
+                                            self.messages.push(Message::new(MessageType::Warning, warning));
+                                        }
+                                        if let Some(warning) = self.presales_limit_warning(&form_clone) {
+                                            self.messages.push(Message::new(MessageType::Warning, warning));
+                                        }
                                         // Optimistically add the entry locally so the UI
                                         // reflects it immediately, then refresh from API.
                                         if let Ok(date) = chrono::NaiveDate::parse_from_str(&form_clone.date, "%Y-%m-%d") {
@@ -864,8 +1029,7 @@ impl App {
                                                 comment: if form_clone.comment.is_empty() { None } else { Some(form_clone.comment.clone()) },
                                             });
                                         }
-                                        // Refresh week data in background to get the real ID
-                                        let _ = self.load_week_data().await;
+                                        let _ = self.reload_current_context(true).await;
                                     }
                                     Err(e) => {
                                         self.messages.push(Message::new(
@@ -1149,6 +1313,12 @@ impl App {
                                             MessageType::Success,
                                             "Entry updated successfully".to_string(),
                                         ));
+                                        if let Some(warning) = form_clone.presales_opportunity_warning() {
+                                            self.messages.push(Message::new(MessageType::Warning, warning));
+                                        }
+                                        if let Some(warning) = self.presales_limit_warning(&form_clone) {
+                                            self.messages.push(Message::new(MessageType::Warning, warning));
+                                        }
                                         // Optimistically update the entry locally so the UI
                                         // reflects it immediately, then refresh from API.
                                         if let Some(ref id) = entry_id_clone {
@@ -1165,8 +1335,7 @@ impl App {
                                                 }
                                             }
                                         }
-                                        // Refresh week data in background to get consistent state
-                                        let _ = self.load_week_data().await;
+                                        let _ = self.reload_current_context(true).await;
                                     }
                                     Err(e) => {
                                         self.messages.push(Message::new(
@@ -1290,8 +1459,8 @@ impl App {
                                         "Entry deleted successfully".to_string(),
                                     ));
 
-                                    // Refresh week data to update the view
-                                    let _ = self.load_week_data().await;
+                                    // Refresh data to update the view
+                                    let _ = self.reload_current_context(true).await;
 
                                     // Adjust selection if needed
                                     let remaining_entries: Vec<_> =
@@ -1330,36 +1499,20 @@ impl App {
 
     /// Navigate to previous week
     async fn previous_week(&mut self) -> Result<()> {
-        let old_month = self.current_week_start.month();
         self.current_week_start -= chrono::Duration::days(7);
-        let new_month = self.current_week_start.month();
-
         self.selected_day = Some(self.current_week_start);
         self.selected_entry_index = None;
-        self.load_week_data().await?;
-
-        // Reload monthly data if month changed
-        if old_month != new_month {
-            self.load_month_data().await?;
-        }
+        self.reload_current_context(false).await?;
 
         Ok(())
     }
 
     /// Navigate to next week
     async fn next_week(&mut self) -> Result<()> {
-        let old_month = self.current_week_start.month();
         self.current_week_start += chrono::Duration::days(7);
-        let new_month = self.current_week_start.month();
-
         self.selected_day = Some(self.current_week_start);
         self.selected_entry_index = None;
-        self.load_week_data().await?;
-
-        // Reload monthly data if month changed
-        if old_month != new_month {
-            self.load_month_data().await?;
-        }
+        self.reload_current_context(false).await?;
 
         Ok(())
     }
@@ -1478,7 +1631,8 @@ impl App {
         self.messages.clear();
         self.messages.push(Message::new(
             MessageType::Info,
-            "Add mode - Tab to navigate fields, Enter to save, Esc to cancel".to_string(),
+            "Add mode - Tab to navigate fields, Enter to save, Esc to cancel, Ctrl+R reset cache"
+                .to_string(),
         ));
     }
 
@@ -1504,7 +1658,7 @@ impl App {
                     self.messages.clear();
                     self.messages.push(Message::new(
                         MessageType::Info,
-                        "Edit mode - Tab to navigate fields, Enter to save, Esc to cancel"
+                        "Edit mode - Tab to navigate fields, Enter to save, Esc to cancel, Ctrl+R reset cache"
                             .to_string(),
                     ));
                 }

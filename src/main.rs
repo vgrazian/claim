@@ -17,6 +17,7 @@ pub use logging::init as init_logging;
 
 use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
+use crate::cache::EntryCache;
 use config::Config;
 use monday::MondayClient;
 use std::process;
@@ -127,6 +128,17 @@ enum Commands {
         #[arg(short = 'v', long = "verbose")]
         verbose: bool,
     },
+    /// Reset the local cache
+    Cache {
+        #[command(subcommand)]
+        command: CacheCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum CacheCommands {
+    /// Reset the local cache for the current user
+    Reset,
 }
 
 #[tokio::main]
@@ -153,6 +165,7 @@ async fn run(cli: Cli) -> Result<()> {
         Some(Commands::Query { verbose, .. }) => *verbose,
         Some(Commands::Add { verbose, .. }) => *verbose,
         Some(Commands::Delete { verbose, .. }) => *verbose,
+        Some(Commands::Cache { .. }) => false,
         None => false,
     };
 
@@ -268,6 +281,14 @@ async fn run(cli: Cli) -> Result<()> {
             )
             .await?;
         }
+        Some(Commands::Cache { command }) => match command {
+            CacheCommands::Reset => {
+                let mut cache = EntryCache::load().unwrap_or_else(|_| EntryCache::new());
+                cache.clear_user(user.id);
+                cache.save()?;
+                println!("Local cache reset for user {}", user.id);
+            }
+        },
         None => {
             // Launch interactive UI when no command is provided
             println!("Launching interactive UI...\n");

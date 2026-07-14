@@ -2,6 +2,8 @@
 
 use chrono::NaiveDate;
 
+use crate::cache::{is_presales_opportunity_entry, is_valid_opportunity_code};
+
 /// Form field types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormField {
@@ -250,6 +252,24 @@ impl FormData {
         }
 
         Ok(())
+    }
+
+    pub fn presales_opportunity_warning(&self) -> Option<String> {
+        if !is_presales_opportunity_entry(&self.customer, &self.work_item) {
+            return None;
+        }
+
+        if self.comment.is_empty() {
+            return Some("Opportunity code recommended for PRESALES M.34212".to_string());
+        }
+
+        if !is_valid_opportunity_code(&self.comment) {
+            return Some(
+                "Opportunity code should be an 18-character alphanumeric value".to_string(),
+            );
+        }
+
+        None
     }
 
     /// Insert character at cursor position

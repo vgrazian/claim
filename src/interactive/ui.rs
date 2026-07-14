@@ -36,6 +36,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     match app.mode {
         AppMode::Help => render_help(f, chunks[1]),
         AppMode::Report => render_report(f, app, chunks[1]),
+        AppMode::PresalesReport => render_presales_report(f, app, chunks[1]),
         _ => render_main_content(f, app, chunks[1]),
     }
 
@@ -231,13 +232,14 @@ fn render_messages(f: &mut Frame, app: &App, area: Rect) {
 fn render_footer(f: &mut Frame, app: &App, area: Rect) {
     let shortcuts = match app.mode {
         AppMode::Normal => {
-            "[Tab] Next week  [Shift+Tab] Prev week  [←→] Days  [↑↓] Entries  [Enter/e] Edit  [a]dd  [d]elete  [u]pdate  [p]rint  [?] help  [q]uit"
+            "[Tab] Next week  [Shift+Tab] Prev week  [←→] Days  [↑↓] Entries  [Enter/e] Edit  [a]dd  [d]elete  [u]pdate  [p]rint  [o]pportunities  [?] help  [q]uit"
         }
         AppMode::AddEntry => "[Esc] Cancel add",
         AppMode::EditEntry => "[Esc] Cancel edit",
         AppMode::DeleteEntry => "[y] Confirm  [n/Esc] Cancel",
         AppMode::Help => "Press any key to return",
         AppMode::Report => "[↑↓] Select row  [c] Copy row  [m] Mark/unmark  [C] Copy marked  [Tab] Next week  [Shift+Tab] Prev week  [Esc/p/q] Return to normal view",
+        AppMode::PresalesReport => "[↑↓] Select row  [Tab] Next week  [Shift+Tab] Prev week  [Esc/o/q] Return to normal view",
     };
 
     let footer = Paragraph::new(shortcuts)
@@ -685,6 +687,92 @@ fn render_report(f: &mut Frame, app: &App, area: Rect) {
                 .border_style(Style::default().fg(Color::Cyan)),
         )
         .column_spacing(1);
+
+    f.render_widget(table, area);
+}
+
+fn render_presales_report(f: &mut Frame, app: &App, area: Rect) {
+    use ratatui::widgets::Table;
+
+    let opportunity_rows = app.presales_report_rows();
+    let missing_rows = app.presales_missing_comment_rows();
+
+    let mut rows = Vec::new();
+    rows.push(
+        Row::new(vec![
+            Cell::from("Opportunity / Date"),
+            Cell::from("Hours"),
+            Cell::from("Section"),
+        ])
+        .style(
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Cyan),
+        ),
+    );
+
+    let mut current_row_index = 0usize;
+
+    for (code, total_hours) in &opportunity_rows {
+        let style = if app.selected_presales_row == Some(current_row_index) {
+            Style::default().bg(Color::DarkGray).fg(Color::White)
+        } else {
+            Style::default()
+        };
+        rows.push(
+            Row::new(vec![
+                Cell::from(code.clone()),
+                Cell::from(format_hours(*total_hours)),
+                Cell::from("Opportunity totals"),
+            ])
+            .style(style),
+        );
+        current_row_index += 1;
+    }
+
+    if !missing_rows.is_empty() {
+        for (date, hours) in &missing_rows {
+            let style = if app.selected_presales_row == Some(current_row_index) {
+                Style::default().bg(Color::DarkGray).fg(Color::White)
+            } else {
+                Style::default().fg(Color::Yellow)
+            };
+            rows.push(
+                Row::new(vec![
+                    Cell::from(date.format("%Y-%m-%d").to_string()),
+                    Cell::from(format_hours(*hours)),
+                    Cell::from("Missing/invalid opportunity comment"),
+                ])
+                .style(style),
+            );
+            current_row_index += 1;
+        }
+    }
+
+    if opportunity_rows.is_empty() && missing_rows.is_empty() {
+        rows.push(Row::new(vec![
+            Cell::from("No yearly PRESALES data"),
+            Cell::from(""),
+            Cell::from(""),
+        ]));
+    }
+
+    let title = format!(" PRESALES Report - {} ", app.current_week_start.year());
+    let table = Table::new(
+        rows,
+        vec![
+            Constraint::Percentage(40),
+            Constraint::Percentage(15),
+            Constraint::Percentage(45),
+        ],
+    )
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(title)
+            .border_style(Style::default().fg(Color::Cyan)),
+    )
+    .column_spacing(1);
 
     f.render_widget(table, area);
 }

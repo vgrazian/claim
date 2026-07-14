@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Summary view in the TUI now shows yearly PRESALES `M.34212` opportunity totals for valid 18-character alphanumeric opportunity codes visible in the current week
+- Local persistent caching now stores yearly PRESALES opportunity usage totals and supports reset from both the TUI (`Ctrl+R`) and the CLI via `claim cache reset`
+
+### Changed
+- PRESALES `M.34212` entries now warn when the comment is missing or not a valid 18-character alphanumeric opportunity code, without blocking save
+- The TUI summary panel title changed from monthly-only wording to a combined Summary view with month and year sections
+- Version updated to 0.3.0
+
 ### Fixed
 - TUI now shows newly added or edited entries immediately without needing to exit and re-enter; entries are inserted/updated in local state optimistically before the API refresh completes
 - Comment field is now correctly saved and reloaded: the extraction logic now reads from column `text2__1` (matching the write path) with a fallback to `long_text` for backward compatibility

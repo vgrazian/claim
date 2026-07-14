@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use chrono::{DateTime, Local, NaiveDate};
+use chrono::{DateTime, Datelike, Local, NaiveDate};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -14,10 +14,21 @@ pub struct CachedEntry {
     pub last_used: String, // ISO 8601 date string
 }
 
-/// Cache structure for storing recent entries per user
+/// Cached yearly presales usage for a specific opportunity code
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PresalesOpportunityUsage {
+    pub opportunity_code: String,
+    pub year: i32,
+    pub total_hours: f64,
+    pub last_updated: String,
+}
+
+/// Cache structure for storing recent entries and yearly presales usage per user
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntryCache {
     pub entries: HashMap<i64, Vec<CachedEntry>>, // user_id -> entries
+    #[serde(default)]
+    pub presales_usage: HashMap<i64, Vec<PresalesOpportunityUsage>>, // user_id -> yearly usage
     pub last_updated: String,                    // ISO 8601 timestamp
 }
 
@@ -26,6 +37,7 @@ impl EntryCache {
     pub fn new() -> Self {
         EntryCache {
             entries: HashMap::new(),
+            presales_usage: HashMap::new(),
             last_updated: Local::now().to_rfc3339(),
         }
     }
@@ -147,8 +159,8 @@ impl EntryCache {
 
         // Add hardcoded PRESALES entry as option 0
         unique.push(CachedEntry {
-            customer: "PRESALES".to_string(),
-            work_item: "M.34212".to_string(),
+            customer: PRESALES_CUSTOMER.to_string(),
+            work_item: PRESALES_WORK_ITEM.to_string(),
             last_used: Local::now().format("%Y-%m-%d").to_string(),
         });
 
@@ -207,6 +219,24 @@ impl EntryCache {
         self.last_updated = Local::now().to_rfc3339();
     }
 
+    /// Store yearly presales opportunity totals for a user.
+    pub fn set_presales_usage(
+        &mut self,
+        user_id: i64,
+        usage: Vec<PresalesOpportunityUsage>,
+    ) {
+        self.presales_usage.insert(user_id, usage);
+        self.last_updated = Local::now().to_rfc3339();
+    }
+
+    /// Get yearly presales opportunity totals for a user.
+    pub fn get_presales_usage(&self, user_id: i64) -> Vec<PresalesOpportunityUsage> {
+        self.presales_usage
+            .get(&user_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
     /// Check if cache is stale (older than specified hours)
     pub fn is_stale(&self, hours: i64) -> bool {
         if let Ok(last_updated) = DateTime::parse_from_rfc3339(&self.last_updated) {
@@ -218,10 +248,30 @@ impl EntryCache {
         }
     }
 
+    /// Check if yearly presales usage is stale for a user-year.
+    pub fn is_presales_usage_stale(&self, user_id: i64, year: i32, weeks: i64) -> bool {
+        let Some(entries) = self.presales_usage.get(&user_id) else {
+            return true;
+        };
+
+        let Some(latest) = entries
+            .iter()
+            .filter(|entry| entry.year == year)
+            .filter_map(|entry| DateTime::parse_from_rfc3339(&entry.last_updated).ok())
+            .max()
+        else {
+            return true;
+        };
+
+        let duration = Local::now().signed_duration_since(latest);
+        duration.num_weeks() >= weeks
+    }
+
     /// Clear all entries for all users
     #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.entries.clear();
+        self.presales_usage.clear();
         self.last_updated = Local::now().to_rfc3339();
     }
 
@@ -229,8 +279,94 @@ impl EntryCache {
     #[allow(dead_code)]
     pub fn clear_user(&mut self, user_id: i64) {
         self.entries.remove(&user_id);
+        self.presales_usage.remove(&user_id);
         self.last_updated = Local::now().to_rfc3339();
     }
+}
+
+pub const PRESALES_CUSTOMER: &str = "PRESALES";
+pub const PRESALES_WORK_ITEM: &str = "M.34212";
+pub const PRESALES_OPPORTUNITY_HOURS_LIMIT: f64 = 24.0;
+
+pub fn is_presales_opportunity_entry(customer: &str, work_item: &str) -> bool {
+    customer == PRESALES_CUSTOMER && work_item == PRESALES_WORK_ITEM
+}
+
+pub fn is_valid_opportunity_code(comment: &str) -> bool {
+    comment.len() == 18 && comment.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
+pub fn calculate_presales_yearly_usage(
+    items: &[crate::monday::Item],
+    year: i32,
+) -> Vec<PresalesOpportunityUsage> {
+    let mut usage: HashMap<String, f64> = HashMap::new();
+
+    for item in items {
+        let date = item.column_values.iter().find_map(|cv| {
+            if cv.id.as_deref() == Some("date4") {
+                cv.text
+                    .as_ref()
+                    .and_then(|text| NaiveDate::parse_from_str(text, "%Y-%m-%d").ok())
+            } else {
+                None
+            }
+        });
+
+        let Some(date) = date else {
+            continue;
+        };
+
+        if date.year() != year {
+            continue;
+        }
+
+        let customer = item
+            .column_values
+            .iter()
+            .find(|cv| cv.id.as_deref() == Some("text__1"))
+            .and_then(|cv| cv.text.clone())
+            .unwrap_or_default();
+        let work_item = item
+            .column_values
+            .iter()
+            .find(|cv| cv.id.as_deref() == Some("text8__1"))
+            .and_then(|cv| cv.text.clone())
+            .unwrap_or_default();
+        let comment = item
+            .column_values
+            .iter()
+            .find(|cv| cv.id.as_deref() == Some("text2__1") || cv.id.as_deref() == Some("long_text"))
+            .and_then(|cv| cv.text.clone())
+            .filter(|text| !text.is_empty() && text != "null")
+            .unwrap_or_default();
+        let hours = item
+            .column_values
+            .iter()
+            .find(|cv| cv.id.as_deref() == Some("numbers__1"))
+            .and_then(|cv| cv.text.as_ref())
+            .and_then(|text| text.parse::<f64>().ok())
+            .unwrap_or(0.0);
+
+        if !is_presales_opportunity_entry(&customer, &work_item) || !is_valid_opportunity_code(&comment) {
+            continue;
+        }
+
+        *usage.entry(comment).or_insert(0.0) += hours;
+    }
+
+    let now = Local::now().to_rfc3339();
+    let mut results: Vec<_> = usage
+        .into_iter()
+        .map(|(opportunity_code, total_hours)| PresalesOpportunityUsage {
+            opportunity_code,
+            year,
+            total_hours,
+            last_updated: now.clone(),
+        })
+        .collect();
+    results.sort_by(|a, b| a.opportunity_code.cmp(&b.opportunity_code));
+    results
 }
 
 impl Default for EntryCache {
@@ -242,6 +378,7 @@ impl Default for EntryCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::monday::{ColumnValue, Item};
 
     const TEST_USER_ID: i64 = 12345;
 
@@ -321,8 +458,8 @@ mod tests {
         // Should have 3 entries: PRESALES (hardcoded) + 2 unique user entries
         assert_eq!(unique.len(), 3);
         // First entry should be PRESALES
-        assert_eq!(unique[0].customer, "PRESALES");
-        assert_eq!(unique[0].work_item, "M.34212");
+        assert_eq!(unique[0].customer, PRESALES_CUSTOMER);
+        assert_eq!(unique[0].work_item, PRESALES_WORK_ITEM);
     }
 
     #[test]
@@ -434,6 +571,68 @@ mod tests {
         assert_eq!(cache.get_unique_entries(200).len(), 2);
         // User 300 has no entries, but still gets PRESALES = 1 entry
         assert_eq!(cache.get_unique_entries(300).len(), 1);
+    }
+
+    #[test]
+    fn test_is_valid_opportunity_code() {
+        assert!(is_valid_opportunity_code("006gR0000063GeJQAU"));
+        assert!(!is_valid_opportunity_code("006gR0000063GeJQA"));
+        assert!(!is_valid_opportunity_code("006gR0000063GeJQA-"));
+    }
+
+    #[test]
+    fn test_calculate_presales_yearly_usage() {
+        let items = vec![
+            Item {
+                id: Some("1".to_string()),
+                name: Some("one".to_string()),
+                column_values: vec![
+                    ColumnValue { id: Some("date4".to_string()), value: None, text: Some("2026-02-10".to_string()) },
+                    ColumnValue { id: Some("text__1".to_string()), value: None, text: Some(PRESALES_CUSTOMER.to_string()) },
+                    ColumnValue { id: Some("text8__1".to_string()), value: None, text: Some(PRESALES_WORK_ITEM.to_string()) },
+                    ColumnValue { id: Some("text2__1".to_string()), value: None, text: Some("006gR0000063GeJQAU".to_string()) },
+                    ColumnValue { id: Some("numbers__1".to_string()), value: None, text: Some("8".to_string()) },
+                ],
+            },
+            Item {
+                id: Some("2".to_string()),
+                name: Some("two".to_string()),
+                column_values: vec![
+                    ColumnValue { id: Some("date4".to_string()), value: None, text: Some("2026-03-10".to_string()) },
+                    ColumnValue { id: Some("text__1".to_string()), value: None, text: Some(PRESALES_CUSTOMER.to_string()) },
+                    ColumnValue { id: Some("text8__1".to_string()), value: None, text: Some(PRESALES_WORK_ITEM.to_string()) },
+                    ColumnValue { id: Some("text2__1".to_string()), value: None, text: Some("006gR0000063GeJQAU".to_string()) },
+                    ColumnValue { id: Some("numbers__1".to_string()), value: None, text: Some("4".to_string()) },
+                ],
+            },
+            Item {
+                id: Some("3".to_string()),
+                name: Some("three".to_string()),
+                column_values: vec![
+                    ColumnValue { id: Some("date4".to_string()), value: None, text: Some("2025-03-10".to_string()) },
+                    ColumnValue { id: Some("text__1".to_string()), value: None, text: Some(PRESALES_CUSTOMER.to_string()) },
+                    ColumnValue { id: Some("text8__1".to_string()), value: None, text: Some(PRESALES_WORK_ITEM.to_string()) },
+                    ColumnValue { id: Some("text2__1".to_string()), value: None, text: Some("006gR000006239eQAA".to_string()) },
+                    ColumnValue { id: Some("numbers__1".to_string()), value: None, text: Some("7.5".to_string()) },
+                ],
+            },
+            Item {
+                id: Some("4".to_string()),
+                name: Some("four".to_string()),
+                column_values: vec![
+                    ColumnValue { id: Some("date4".to_string()), value: None, text: Some("2026-03-10".to_string()) },
+                    ColumnValue { id: Some("text__1".to_string()), value: None, text: Some(PRESALES_CUSTOMER.to_string()) },
+                    ColumnValue { id: Some("text8__1".to_string()), value: None, text: Some(PRESALES_WORK_ITEM.to_string()) },
+                    ColumnValue { id: Some("text2__1".to_string()), value: None, text: Some("invalid".to_string()) },
+                    ColumnValue { id: Some("numbers__1".to_string()), value: None, text: Some("3".to_string()) },
+                ],
+            },
+        ];
+
+        let usage = calculate_presales_yearly_usage(&items, 2026);
+        assert_eq!(usage.len(), 1);
+        assert_eq!(usage[0].opportunity_code, "006gR0000063GeJQAU");
+        assert_eq!(usage[0].total_hours, 12.0);
     }
 }
 
