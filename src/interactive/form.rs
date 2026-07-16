@@ -205,15 +205,17 @@ impl FormData {
         self.focus_on_cache = !self.focus_on_cache;
     }
 
-    /// Select cache entry (fill customer and work item)
-    /// For PRESALES entry, also sets hours to 8
+    /// Select cache entry (fill customer and work item).
+    /// For PRESALES, always enforces work item M.34212, activity type presales, and hours 8.
     pub fn apply_cache_entry(&mut self, customer: String, work_item: String) {
-        self.customer = customer.clone();
-        self.work_item = work_item;
-
-        // Special handling for PRESALES entry - set hours to 8
         if customer == "PRESALES" {
+            self.customer = "PRESALES".to_string();
+            self.work_item = "M.34212".to_string();
+            self.activity_type = "presales".to_string();
             self.hours = "8".to_string();
+        } else {
+            self.customer = customer;
+            self.work_item = work_item;
         }
 
         self.focus_on_cache = false;
