@@ -857,9 +857,13 @@ fn display_simplified_table(
                 let customer = extract_column_value(item, CUSTOMER_COLUMN_ID);
                 let work_item = extract_column_value(item, WORK_ITEM_COLUMN_ID);
                 let hours_str = extract_column_value(item, "numbers__1");
-                let comment = extract_comment_value(item); // FIXED: Extract comment from correct column
+                let comment = extract_comment_value(item);
                 let hours = hours_str.parse::<f64>().unwrap_or(0.0);
                 total_hours += hours;
+
+                // For M.34212 presales entries show the opportunity on its own line below
+                let is_presales_wi = work_item == "M.34212";
+                let inline_comment = if is_presales_wi { "" } else { &comment };
 
                 println!(
                     "{:<12} {:<12} {:<20} {:<15} {:<6} {:<20}",
@@ -868,8 +872,14 @@ fn display_simplified_table(
                     truncate_string(&customer, 18),
                     truncate_string(&work_item, 13),
                     hours_str,
-                    truncate_string(&comment, 18)
+                    truncate_string(inline_comment, 18)
                 );
+
+                if is_presales_wi && !comment.is_empty() {
+                    // Align opportunity code under the Work Item column (pos 44)
+                    // so it can be selected and copied as a clean string
+                    println!("{:<44}{}", "", comment);
+                }
             }
         } else if !has_filters {
             // Only show empty rows when no filters are active
