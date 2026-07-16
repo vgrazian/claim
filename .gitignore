@@ -26,3 +26,5 @@
 # OS-specific
 Thumbs.db
 desktop.ini
+# Bob artifacts
+.bob/

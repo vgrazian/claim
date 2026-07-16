@@ -39,10 +39,10 @@ impl Message {
     /// Get the icon for this message type
     pub fn icon(&self) -> &str {
         match self.message_type {
-            MessageType::Info => "ℹ",
-            MessageType::Success => "✓",
-            MessageType::Warning => "⚠",
-            MessageType::Error => "✗",
+            MessageType::Info => "INFO",
+            MessageType::Success => "OK",
+            MessageType::Warning => "WARN",
+            MessageType::Error => "ERR",
         }
     }
 }
